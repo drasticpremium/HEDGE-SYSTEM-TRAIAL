@@ -14,3 +14,6 @@ Paper-trading only. Educational tool, not financial advice.
 2. dash.cloudflare.com > Workers & Pages > Create > Pages > Connect to Git > pick the repo
 3. Build command: `npm run build`   Output directory: `dist`   > Save and Deploy
 4. Every `git push` after that updates the live site.
+
+git config --global user.name "DRASTIC"
+git config --global user.email "drasticpremium@gmail.com"
