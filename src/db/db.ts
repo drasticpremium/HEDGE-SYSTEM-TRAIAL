@@ -26,10 +26,16 @@ export interface EventLogRow {
   level: 'info' | 'warn' | 'success' | 'error'
 }
 
+export interface SignalRow {
+  id?: number; time: string; pair: string; kind: 'TRADE' | 'NO_TRADE'; dir?: 'CALL' | 'PUT'; price: number; strength: number; vol: number
+  stake?: number; lots?: number; hedgeSide?: 'BUY' | 'SELL'; sl?: number; tp?: number; stopPips?: number; tpPips?: number; expiry?: string; reasons: string[]; skipped: number
+}
+
 class HedgeSignalDeskDatabase extends Dexie {
   history!: Table<CycleLogRow, number>
   events!: Table<EventLogRow, number>
   meta!: Table<{ key: string; value: string }, string>
+  signals!: Table<SignalRow, number>
 
   constructor() {
     super('hedge-signal-desk-db')
@@ -39,6 +45,7 @@ class HedgeSignalDeskDatabase extends Dexie {
       meta: '&key',
     })
     this.version(2).stores({}).upgrade((tx) => tx.table('history').filter((r: CycleLogRow) => (r.entry === 1.0842 && r.lots === 0.15) || (r.entry === 1.2712 && r.lots === 0.12)).delete())
+    this.version(3).stores({ signals: '++id, time, pair, kind' })
   }
 }
 

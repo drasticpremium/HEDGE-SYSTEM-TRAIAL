@@ -1,69 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ensurePair, useTrader } from '../store/trader'
+import { useEffect, useRef, useState } from 'react'
 import { TradingViewChart } from '../components/TradingViewChart'
 import { useAppStore } from '../store/useAppStore'
 
 export function ChartsPage() {
-  const pair = useAppStore((state) => state.pair)
-  const [timeframe, setTimeframe] = useState<'M1' | 'M5' | 'M15'>('M1')
-  const candles = useTrader((s) => s.candles[pair]) ?? []
-  useEffect(() => ensurePair(pair), [pair])
-
-  const visibleCandles = useMemo(() => {
-    const count = timeframe === 'M1' ? 30 : timeframe === 'M5' ? 24 : 16
-    return candles.slice(-count)
-  }, [candles, timeframe])
-
-  const chart = useMemo(() => {
-    const min = Math.min(...visibleCandles.map((c) => c.l), ...visibleCandles.map((c) => c.c))
-    const max = Math.max(...visibleCandles.map((c) => c.h), ...visibleCandles.map((c) => c.c))
-    const range = max - min || 0.0005
-    return visibleCandles.map((candle, index) => {
-      const x = (index / Math.max(visibleCandles.length - 1, 1)) * 100
-      const openY = 100 - ((candle.o - min) / range) * 100
-      const closeY = 100 - ((candle.c - min) / range) * 100
-      const highY = 100 - ((candle.h - min) / range) * 100
-      const lowY = 100 - ((candle.l - min) / range) * 100
-      return { ...candle, x, openY, closeY, highY, lowY }
-    })
-  }, [visibleCandles])
-
+  const pair = useAppStore((s) => s.pair), theme = useAppStore((s) => s.theme)
+  const frame = useRef<HTMLDivElement>(null), [fs, setFs] = useState(false)
+  useEffect(() => { const h = () => setFs(!!document.fullscreenElement); document.addEventListener('fullscreenchange', h); return () => document.removeEventListener('fullscreenchange', h) }, [])
+  const toggle = () => (document.fullscreenElement ? void document.exitFullscreen() : void frame.current?.requestFullscreen())
   return (
     <div className="page-grid">
       <section className="panel card wide">
-        <h2>Chart</h2>
-        <div className="button-row">
-          {(['M1', 'M5', 'M15'] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              className={timeframe === option ? 'active-tab' : ''}
-              onClick={() => setTimeframe(option)}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-        <svg viewBox="0 0 100 100" className="chart-svg" preserveAspectRatio="none" aria-label={`${pair} ${timeframe} chart`}>
-          {chart.map((candle) => (
-            <g key={candle.t}>
-              <line x1={`${candle.x}`} y1={`${candle.highY}`} x2={`${candle.x}`} y2={`${candle.lowY}`} stroke="var(--mut)" strokeWidth="0.6" />
-              <rect
-                x={`${candle.x - 1.2}`}
-                y={Math.min(candle.openY, candle.closeY)}
-                width="2.4"
-                height={Math.max(Math.abs(candle.closeY - candle.openY), 1.6)}
-                fill={candle.c >= candle.o ? 'var(--ok)' : 'var(--bad)'}
-                rx="0.5"
-              />
-            </g>
-          ))}
-        </svg>
-      </section>
-
-      <section className="panel card wide">
-        <h2>TradingView widget</h2>
-        <TradingViewChart symbol={`FX:${pair}`} />
+        <div className="row-between"><h2>{pair} live market (TradingView)</h2><button type="button" className="btn" onClick={toggle}>{fs ? 'Exit full screen' : 'Full screen'}</button></div>
+        <p className="mut">Real market data. The auto trader uses a separate simulated feed. Drag the bottom-right corner to resize. Change the pair in the top bar.</p>
+        <div ref={frame} className="tv-frame"><TradingViewChart symbol={`FX:${pair}`} theme={theme === 'light' ? 'light' : 'dark'} /></div>
       </section>
     </div>
   )

@@ -6,16 +6,16 @@ import { step, type Cycle } from '../engine/cycle'
 import { sessionMult } from '../feed/sim'
 import { isSessionOpen } from '../engine/clock'
 import { useAppStore } from './useAppStore'
-import { addEventRow, addHistoryRow } from '../db/db'
+import { addEventRow, addHistoryRow, db, type SignalRow } from '../db/db'
 
 interface TraderState {
-  running: boolean; speed: number; respectSession: boolean; watchlist: string[]
+  running: boolean; news: boolean; speed: number; respectSession: boolean; watchlist: string[]
   simT: number; prices: Record<string, number>; candles: Record<string, Candle[]>
   cycle: Cycle | null; events: string[]; status: string; sessionCycles: number
   set: (p: Partial<TraderState>) => void
 }
 export const useTrader = create<TraderState>((set) => ({
-  running: true, speed: 1, respectSession: true, watchlist: ['EURUSD', 'GBPUSD', 'AUDUSD'],
+  running: true, news: false, speed: 1, respectSession: true, watchlist: ['EURUSD', 'GBPUSD', 'AUDUSD'],
   simT: Date.now(), prices: {}, candles: {}, cycle: null, events: ['Auto trader started (SIMULATED data, paper money)'], status: 'Warming up', sessionCycles: 0,
   set: (p) => set(p),
 }))
@@ -40,20 +40,50 @@ const push = (msg: string, cycleId?: number) => {
   useTrader.setState((s) => ({ events: [`${new Date(M.simT).toISOString().slice(11, 19)} ${msg}`, ...s.events].slice(0, 40) }))
   void addEventRow({ cycleId, time: new Date(M.simT).toISOString(), message: msg, level: 'info' })
 }
-function tryOpen(pair: string) {
+export function evaluate(pair: string, simT: number) {
   const app = useAppStore.getState(), tr = useTrader.getState()
-  const m1 = M.candles[pair], price = M.prices[pair], pip = pipSize(pair)
-  const open = !tr.respectSession || isSessionOpen(M.simT)
-  if (!open) { useTrader.setState({ status: 'WAIT: session closed (08:00-17:00 GMT on sim clock)' }); return }
-  if (M.simT - M.lastOpenT < 120000) { useTrader.setState({ status: 'WAIT: cooldown after last cycle' }); return }
-  const vol = Math.max(1, realizedVol15(m1.slice(-60).map((c) => c.c), pip) ?? defaultVol15(pair))
-  const a = atr(m1, 14)
-  const sig = calculateSignal({ pair, price, m1, spreadPips: 0.6, atrPips: a ? a / pip : vol / 3, vol15: vol, sessionOpen: open })
-  if (!sig.ready || sig.strength < 60) { useTrader.setState({ status: `WAIT: ${pair} strength ${sig.strength}, no clean setup` }); return }
+  const m1 = M.candles[pair], price = M.prices[pair]
+  if (!m1 || !price || m1.length < 15) return null
+  const pip = pipSize(pair), vol = Math.max(1, realizedVol15(m1.slice(-60).map((c) => c.c), pip) ?? defaultVol15(pair)), a = atr(m1, 14)
+  const session = !tr.respectSession || isSessionOpen(simT), spread = 0.6
+  const sig = calculateSignal({ pair, price, m1, spreadPips: spread, atrPips: a ? a / pip : vol / 3, vol15: vol, sessionOpen: session })
   const stake = Math.max(app.minimumBinaryStake, (app.binaryBalanceUsd * app.binaryStakePercent) / 100)
-  if (app.binaryBalanceUsd < stake) { useTrader.setState({ status: 'SKIPPED: balance below minimum stake' }); return }
-  const pv = pipValuePerLot(pair), sz = sizing(vol, stake * app.hedgeRiskRatio, pv)
-  const c: Cycle = { id: ++M.id, pair, dir: sig.direction, entry: price, openT: M.simT, expiryT: M.simT + 15 * 60000, stake, lots: sz.lots, pip, pipValue: pv, stopPips: sz.stopPips, tpPips: sz.tpPips, strength: sig.strength, payout: 0.95, costPerLot: app.commissionPerLotRoundTrip, stopHit: false, tpHit: false, counterState: 'none', counterEntry: null }
+  const sz = sizing(vol, stake * app.hedgeRiskRatio, pipValuePerLot(pair))
+  const reasons: string[] = []
+  if (!session) reasons.push('Session closed (08:00-17:00 GMT)')
+  if (tr.news) reasons.push('News nearby switch is on')
+  if (spread > 1.4) reasons.push('Spread too wide')
+  if (vol < 1.5 || vol > 8) reasons.push(`Volatility ${vol.toFixed(1)} pips is outside the normal 1.5-8 range`)
+  if (sig.strength < 60) reasons.push(`Strength ${sig.strength} is below 60`)
+  else if (!sig.ready) reasons.push('Trend and momentum disagree')
+  if (app.binaryBalanceUsd < stake) reasons.push('Balance below minimum stake')
+  return { vol, spread, sig, stake, sz, session, price, pip, reasons, ready: reasons.length === 0 && sig.ready }
+}
+const lastKind: Record<string, { kind: string; id: number; skipped: number }> = {}, inits: Record<string, Promise<void>> = {}
+/** One row per tradable candle. Consecutive no-trade candles share ONE red row until a candle is tradable again. */
+async function recordSignal(pair: string) {
+  const e = evaluate(pair, M.simT); if (!e) return
+  await (inits[pair] ??= db.signals.where('pair').equals(pair).last().then((r) => { lastKind[pair] = r ? { kind: r.kind, id: r.id!, skipped: r.skipped } : { kind: '', id: 0, skipped: 0 } }))
+  const last = lastKind[pair], time = new Date(M.simT).toISOString()
+  if (!e.ready) {
+    if (last.kind === 'NO_TRADE') { last.skipped++; if (last.id > 0) void db.signals.update(last.id, { skipped: last.skipped, reasons: e.reasons }); return }
+    const st = { kind: 'NO_TRADE', id: -1, skipped: 1 }; lastKind[pair] = st
+    st.id = await db.signals.add({ time, pair, kind: 'NO_TRADE', price: e.price, strength: e.sig.strength, vol: e.vol, reasons: e.reasons, skipped: 1 }); return
+  }
+  const dir = e.sig.direction, sg = dir === 'CALL' ? 1 : -1
+  const row: SignalRow = { time, pair, kind: 'TRADE', dir, price: e.price, strength: e.sig.strength, vol: e.vol, stake: e.stake, lots: e.sz.lots, hedgeSide: dir === 'CALL' ? 'SELL' : 'BUY', sl: e.price + sg * e.sz.stopPips * e.pip, tp: e.price - sg * e.sz.tpPips * e.pip, stopPips: e.sz.stopPips, tpPips: e.sz.tpPips, expiry: new Date(M.simT + 15 * 60000).toISOString(), reasons: e.reasons, skipped: 0 }
+  lastKind[pair] = { kind: 'TRADE', id: 0, skipped: 0 }
+  await db.signals.add(row)
+  const n = await db.signals.count(); if (n > 500) await db.signals.orderBy('id').limit(n - 500).delete()
+}
+function tryOpen(pair: string) {
+  const app = useAppStore.getState()
+  const e = evaluate(pair, M.simT)
+  if (!e) return
+  if (!e.ready) { useTrader.setState({ status: `WAIT: ${e.reasons[0] ?? 'no clean setup'}` }); return }
+  if (M.simT - M.lastOpenT < 120000) { useTrader.setState({ status: 'WAIT: cooldown after last cycle' }); return }
+  const { sig, stake, sz } = e
+  const c: Cycle = { id: ++M.id, pair, dir: sig.direction, entry: e.price, openT: M.simT, expiryT: M.simT + 15 * 60000, stake, lots: sz.lots, pip: e.pip, pipValue: pipValuePerLot(pair), stopPips: sz.stopPips, tpPips: sz.tpPips, strength: sig.strength, payout: 0.95, costPerLot: app.commissionPerLotRoundTrip, stopHit: false, tpHit: false, counterState: 'none', counterEntry: null }
   M.cycle = c; M.lastOpenT = M.simT
   push(`OPEN ${pair} ${c.dir} strength ${c.strength}. Quotex: $${stake.toFixed(2)} 15m. Exness: ${c.dir === 'CALL' ? 'SELL' : 'BUY'} ${c.lots} lots, stop ${c.stopPips}p, TP ${c.tpPips}p`, c.id)
 }
@@ -73,7 +103,7 @@ function tick() {
     M.simT += 1000
     for (const p of tr.watchlist) {
       const rolled = advance(p, M.simT)
-      if (rolled && !M.cycle) tryOpen(p)
+      if (rolled) { void recordSignal(p); if (!M.cycle) tryOpen(p) }
     }
     if (M.cycle) {
       const c = M.cycle, r = step(c, M.prices[c.pair], M.simT)

@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { atr, realizedVol15, sizing } from '../engine/math'
-import { defaultVol15, pipSize, pipValuePerLot } from '../engine/pairs'
-import { calculateSignal } from '../engine/signal'
-import { isSessionOpen } from '../engine/clock'
-import { ensurePair, useTrader } from '../store/trader'
+import { pipSize, pipValuePerLot } from '../engine/pairs'
+import { ensurePair, evaluate, useTrader } from '../store/trader'
+import { SignalHistory } from '../components/SignalHistory'
+import { Pill } from '../components/Pill'
 import { useAppStore } from '../store/useAppStore'
 
 interface Ticket { dir: 'CALL' | 'PUT'; entry: number; t: number; strength: number; stake: number; lots: number; stopPips: number; tpPips: number; missed: boolean }
@@ -12,18 +11,12 @@ const hms = (t: number) => new Date(t).toISOString().slice(11, 19)
 
 export function DeskPage() {
   const app = useAppStore(), pair = app.pair, tr = useTrader()
-  const [news, setNews] = useState(false), [ticket, setTicket] = useState<Ticket | null>(null), [now, setNow] = useState(Date.now()), [copied, setCopied] = useState('')
+  const news = tr.news, setNews = (v: boolean) => tr.set({ news: v }), [ticket, setTicket] = useState<Ticket | null>(null), [now, setNow] = useState(Date.now()), [copied, setCopied] = useState('')
   useEffect(() => ensurePair(pair), [pair])
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(i) }, [])
   const m1 = tr.candles[pair] ?? [], price = tr.prices[pair], pip = pipSize(pair), pv = pipValuePerLot(pair)
-  const calc = useMemo(() => {
-    if (!price || m1.length < 15) return null
-    const vol = Math.max(1, realizedVol15(m1.slice(-60).map((c) => c.c), pip) ?? defaultVol15(pair)), a = atr(m1, 14), spread = 0.6
-    const sig = calculateSignal({ pair, price, m1, spreadPips: spread, atrPips: a ? a / pip : vol / 3, vol15: vol, sessionOpen: isSessionOpen(tr.simT) })
-    const stake = Math.max(app.minimumBinaryStake, (app.binaryBalanceUsd * app.binaryStakePercent) / 100), sz = sizing(vol, stake * app.hedgeRiskRatio, pv)
-    return { vol, spread, sig, stake, sz, session: isSessionOpen(tr.simT) }
-  }, [price, m1.length, pair, tr.simT])
-  const ready = !!calc && calc.sig.ready && calc.sig.strength >= 60 && calc.session && !news
+  const calc = useMemo(() => (price ? evaluate(pair, tr.simT) : null), [price, m1.length, pair, tr.simT, tr.news, tr.respectSession])
+  const ready = !!calc && calc.ready
   const tRef = useRef(ticket); tRef.current = ticket
   useEffect(() => {
     if (!calc || !price) return
@@ -52,18 +45,19 @@ export function DeskPage() {
         {check((calc?.vol ?? 0) >= 1.5 && (calc?.vol ?? 99) <= 8, 'Volatility in normal range')}{check((calc?.sig.strength ?? 0) >= 60, 'Strength at least 60')}{check(app.binaryBalanceUsd >= app.minimumBinaryStake, 'Balance covers minimum stake')}</ul></section>
       <section className="panel card block quotex"><h2>Quotex (binary)</h2>
         {!tk ? <p className="empty">Waiting for a READY signal. You will get a sound and a ticket here.</p> : <>
-          <p className="big"><span className={tk.dir === 'CALL' ? 'up' : 'down'}>{tk.dir}</span> {pair.slice(0, 3)}/{pair.slice(3)}</p>
+          <p className="big"><Pill side={tk.dir === 'CALL' ? 'BUY' : 'SELL'} /> <small className="mut">{tk.dir}</small> {pair.slice(0, 3)}/{pair.slice(3)}</p>
           <p>Stake <strong>${tk.stake.toFixed(2)}</strong>, expiry <strong>{expiry} GMT</strong> (15 min)</p><p>Entry about {f(tk.entry)}</p>
           <p>Counter plan: if the Exness stop hits, wait for price at {f(tk.entry + sg * 0.5 * pip)} (entry +0.5 pip, never below entry), then buy a {tk.dir === 'CALL' ? 'PUT' : 'CALL'} for $${tk.stake.toFixed(2)} with the same expiry, at least 1 minute left. One counter at most.</p>
           <button type="button" className="btn" onClick={() => copy('q', `Quotex: ${tk.dir} ${pair} $${tk.stake.toFixed(2)} expiry ${expiry} GMT entry ${f(tk.entry)}`)}>{copied === 'q' ? 'Copied' : 'Copy Quotex ticket'}</button></>}</section>
       <section className="panel card block exness"><h2>Exness (hedge)</h2>
         {!tk ? <p className="empty">The hedge ticket appears together with the binary.</p> : <>
-          <p className="big"><span className={exSide === 'BUY' ? 'up' : 'down'}>{exSide}</span> {tk.lots.toFixed(2)} lots</p>
+          <p className="big"><Pill side={exSide as 'BUY' | 'SELL'} /> {tk.lots.toFixed(2)} lots</p>
           <p>Entry at market about {f(tk.entry)}</p><p>Stop loss <strong>{f(tk.entry + sg * tk.stopPips * pip)}</strong> ({tk.stopPips} pips)</p><p>Take profit <strong>{f(tk.entry - sg * tk.tpPips * pip)}</strong> ({tk.tpPips} pips)</p>
           <p>Close any open hedge at binary expiry {expiry} GMT. Approx margin ${margin.toFixed(2)} at 1:{app.leverage}.</p>
           <button type="button" className="btn" onClick={() => copy('e', `Exness: ${exSide} ${pair} ${tk.lots.toFixed(2)} lots SL ${f(tk.entry + sg * tk.stopPips * pip)} TP ${f(tk.entry - sg * tk.tpPips * pip)}`)}>{copied === 'e' ? 'Copied' : 'Copy Exness ticket'}</button></>}</section>
       {tk && <section className="panel card wide"><h2>Ticket status</h2>{tk.missed ? <p className="down"><strong>MISSED.</strong> Price moved over 0.5 pip or 20 seconds passed. Wait for the next signal.</p> : <><p>Take both trades within <strong>{left.toFixed(0)} s</strong>.</p><div className="bar"><i style={{ width: `${(left / 20) * 100}%` }} /></div></>}
         <p className="mut">Real trades are placed by you on Quotex and Exness. This site never places orders. Prices here are simulated, so use the live feed (coming) before trading real money.</p></section>}
+      <SignalHistory pair={pair} />
     </div>
   )
 }
