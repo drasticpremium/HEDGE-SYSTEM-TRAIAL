@@ -1,166 +1,69 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { type Candle } from '../engine/math'
-import { defaultVol15, pipSize } from '../engine/pairs'
-import { buildDeskTicket, calculateSignal } from '../engine/signal'
-import { makeSimFeed, type Tick } from '../feed/sim'
+import { atr, realizedVol15, sizing } from '../engine/math'
+import { defaultVol15, pipSize, pipValuePerLot } from '../engine/pairs'
+import { calculateSignal } from '../engine/signal'
+import { isSessionOpen } from '../engine/clock'
+import { ensurePair, useTrader } from '../store/trader'
 import { useAppStore } from '../store/useAppStore'
 
-const createMinuteCandle = (t: number, price: number): Candle => ({
-  t,
-  o: price,
-  h: price,
-  l: price,
-  c: price,
-})
+interface Ticket { dir: 'CALL' | 'PUT'; entry: number; t: number; strength: number; stake: number; lots: number; stopPips: number; tpPips: number; missed: boolean }
+const beep = () => { try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 880; o.start(); o.stop(c.currentTime + 0.25) } catch { /* sound blocked */ } }
+const hms = (t: number) => new Date(t).toISOString().slice(11, 19)
 
 export function DeskPage() {
-  const pair = useAppStore((state) => state.pair)
-  const clockMode = useAppStore((state) => state.clockMode)
-  const [tick, setTick] = useState<Tick | null>(null)
-  const [candles, setCandles] = useState<Candle[]>([])
-  const [copied, setCopied] = useState(false)
-  const [alertsEnabled, setAlertsEnabled] = useState(false)
-  const alertLock = useRef(false)
-
+  const app = useAppStore(), pair = app.pair, tr = useTrader()
+  const [news, setNews] = useState(false), [ticket, setTicket] = useState<Ticket | null>(null), [now, setNow] = useState(Date.now()), [copied, setCopied] = useState('')
+  useEffect(() => ensurePair(pair), [pair])
+  useEffect(() => { const i = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(i) }, [])
+  const m1 = tr.candles[pair] ?? [], price = tr.prices[pair], pip = pipSize(pair), pv = pipValuePerLot(pair)
+  const calc = useMemo(() => {
+    if (!price || m1.length < 15) return null
+    const vol = Math.max(1, realizedVol15(m1.slice(-60).map((c) => c.c), pip) ?? defaultVol15(pair)), a = atr(m1, 14), spread = 0.6
+    const sig = calculateSignal({ pair, price, m1, spreadPips: spread, atrPips: a ? a / pip : vol / 3, vol15: vol, sessionOpen: isSessionOpen(tr.simT) })
+    const stake = Math.max(app.minimumBinaryStake, (app.binaryBalanceUsd * app.binaryStakePercent) / 100), sz = sizing(vol, stake * app.hedgeRiskRatio, pv)
+    return { vol, spread, sig, stake, sz, session: isSessionOpen(tr.simT) }
+  }, [price, m1.length, pair, tr.simT])
+  const ready = !!calc && calc.sig.ready && calc.sig.strength >= 60 && calc.session && !news
+  const tRef = useRef(ticket); tRef.current = ticket
   useEffect(() => {
-    setCandles([])
-    setTick(null)
-
-    const stop = makeSimFeed(pair, (nextTick) => {
-      setTick(nextTick)
-      const mid = (nextTick.bid + nextTick.ask) / 2
-      const minute = Math.floor(nextTick.t / 60000) * 60000
-      setCandles((prev) => {
-        const last = prev[prev.length - 1]
-        if (!last || last.t !== minute) {
-          return [...prev.slice(-119), createMinuteCandle(minute, mid)]
-        }
-        const current = { ...last }
-        current.h = Math.max(current.h, mid)
-        current.l = Math.min(current.l, mid)
-        current.c = mid
-        return [...prev.slice(0, -1), current]
-      })
-    }, 1)
-
-    return () => stop()
-  }, [pair])
-
-  const price = tick ? (tick.bid + tick.ask) / 2 : 1.0842
-  const pip = pipSize(pair)
-  const spreadPips = tick ? (tick.ask - tick.bid) / pip : 0.8
-  const currentVol = defaultVol15(pair)
-  const signal = useMemo(
-    () =>
-      calculateSignal({
-        pair,
-        price,
-        m1: candles,
-        spreadPips,
-        atrPips: candles.length > 14 ? (candles[candles.length - 1].c - candles[candles.length - 2].c) / pip + 2.2 : 2.6,
-        vol15: currentVol,
-        sessionOpen: true,
-      }),
-    [candles, pair, price, spreadPips, currentVol],
-  )
-
-  const ticket = useMemo(
-    () =>
-      buildDeskTicket({
-        pair,
-        direction: signal.direction,
-        strength: signal.strength,
-        stake: 12,
-        entry: price,
-        stop: signal.stop,
-        takeProfit: signal.takeProfit,
-        expiryMinutesLeft: 14.53,
-        lots: signal.lots,
-        expiresAt: Date.now() + 14.53 * 60 * 1000,
-      }),
-    [pair, price, signal],
-  )
-
-  useEffect(() => {
-    if (!signal.ready || alertLock.current) return
-    alertLock.current = true
-    document.title = 'Hedge Signal Desk • READY'
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('Signal ready', { body: ticket })
-    }
-    if ('vibrate' in navigator) navigator.vibrate([120, 80, 140])
-    const timeout = window.setTimeout(() => {
-      document.title = 'Hedge Signal Desk'
-    }, 1800)
-    return () => window.clearTimeout(timeout)
-  }, [signal.ready, ticket])
-
-  const checklist = [
-    { label: 'Session 08:00-17:00 GMT', ok: true },
-    { label: 'News nearby toggle off', ok: true },
-    { label: `Spread normal (${spreadPips.toFixed(1)} pips)`, ok: spreadPips < 1.5 },
-    { label: `Realized vol in range (${currentVol.toFixed(1)} pips)`, ok: currentVol > 2 && currentVol < 7 },
-    { label: `ATR regime normal (${((signal.score / 100) * 3).toFixed(1)} pips)`, ok: signal.score >= 60 },
-  ]
-
-  const copyTicket = async () => {
-    try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(ticket)
-      } else {
-        throw new Error('Clipboard not available')
-      }
-    } catch {
-      // Fallback for restricted or automated browser contexts.
-    }
-
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1200)
-  }
-
-  const requestAlerts = async () => {
-    if (!('Notification' in window)) return
-    const permission = await Notification.requestPermission()
-    setAlertsEnabled(permission === 'granted')
-  }
-
+    if (!calc || !price) return
+    const tk = tRef.current
+    if (!tk && ready) { setTicket({ dir: calc.sig.direction, entry: price, t: Date.now(), strength: calc.sig.strength, stake: calc.stake, lots: calc.sz.lots, stopPips: calc.sz.stopPips, tpPips: calc.sz.tpPips, missed: false }); beep(); document.title = 'SIGNAL READY - Hedge Signal Desk' }
+    else if (tk && !tk.missed && (Date.now() - tk.t > 20000 || Math.abs(price - tk.entry) / pip > 0.5)) setTicket({ ...tk, missed: true })
+    else if (tk && tk.missed && !ready) { setTicket(null); document.title = 'Hedge Signal Desk' }
+  }, [price, ready])
+  const dp = pair.endsWith('JPY') ? 3 : 5, f = (x: number) => x.toFixed(dp)
+  const check = (ok: boolean, label: string) => <li className={ok ? 'ok' : 'no'}>{ok ? '✔' : '✖'} {label}</li>
+  const copy = (k: string, text: string) => { void navigator.clipboard?.writeText(text); setCopied(k); setTimeout(() => setCopied(''), 1500) }
+  const tk = ticket, left = tk ? Math.max(0, 20 - (now - tk.t) / 1000) : 0
+  const exSide = tk?.dir === 'CALL' ? 'SELL' : 'BUY', sg = tk?.dir === 'CALL' ? 1 : -1
+  const expiry = tk ? hms(tk.t + 15 * 60000) : ''
+  const quoteUsd = pv / 100000 / pip
+  const margin = tk && price ? (tk.lots * 100000 * (pair.startsWith('USD') ? 1 : price * quoteUsd)) / app.leverage : 0
   return (
     <div className="page-grid">
-      <section className="panel card">
-        <h2>Live Desk</h2>
-        <p>Pair: {pair}</p>
-        <p>Mode: {clockMode === 'sim' ? 'SIM CLOCK' : 'LIVE CLOCK'}</p>
-        <p>Signal state: <strong>{signal.status}</strong></p>
-        <p>Price: {price.toFixed(pair.endsWith('JPY') ? 3 : 5)}</p>
-      </section>
-
-      <section className="panel card">
-        <h2>Trade ticket</h2>
-        <div className="ticket-box">{ticket}</div>
-        <div className="button-row">
-          <button type="button" onClick={copyTicket}>{copied ? 'Copied' : 'Copy ticket'}</button>
-          <button type="button" onClick={requestAlerts}>{alertsEnabled ? 'Alerts enabled' : 'Enable browser alerts'}</button>
-        </div>
-      </section>
-
-      <section className="panel card">
-        <h2>Signal</h2>
-        <p>Strength: {signal.strength}</p>
-        <p>Probability: {(signal.probability * 100).toFixed(0)}% model estimate</p>
-        <div className="gauge">
-          <div className="gauge-fill" style={{ width: `${Math.min(100, Math.max(0, signal.score))}%` }} />
-        </div>
-        <p>{signal.reasons.join(' • ')}</p>
-      </section>
-
-      <section className="panel card wide">
-        <h2>Checklist</h2>
-        <ul className="checklist">
-          {checklist.map((item) => (
-            <li key={item.label} className={item.ok ? 'ok' : 'warn'}>{item.label}</li>
-          ))}
-        </ul>
-      </section>
+      <section className="panel card"><h2>{pair} signal</h2>
+        <div className={`state ${ready ? 'ready' : calc ? 'wait' : 'none'}`}>{!calc ? 'LOADING' : ready ? 'READY' : calc.session && !news ? 'WAIT' : 'NO TRADE'}</div>
+        <p className="big">{price ? f(price) : '...'}</p>
+        <p>Strength {calc?.sig.strength ?? 0}/100, direction {calc?.sig.direction ?? '-'}. Volatility {calc?.vol.toFixed(1) ?? '-'} pips per 15 min.</p>
+        <label className="watch-item"><input type="checkbox" checked={news} onChange={(e) => setNews(e.target.checked)} /> News nearby (blocks signals)</label></section>
+      <section className="panel card"><h2>Conditions</h2><ul className="checks">
+        {check(!!calc?.session, 'Session open 08:00-17:00 GMT (sim clock)')}{check(!news, 'No news nearby')}{check((calc?.spread ?? 9) <= 1.4, 'Spread normal')}
+        {check((calc?.vol ?? 0) >= 1.5 && (calc?.vol ?? 99) <= 8, 'Volatility in normal range')}{check((calc?.sig.strength ?? 0) >= 60, 'Strength at least 60')}{check(app.binaryBalanceUsd >= app.minimumBinaryStake, 'Balance covers minimum stake')}</ul></section>
+      <section className="panel card block quotex"><h2>Quotex (binary)</h2>
+        {!tk ? <p className="empty">Waiting for a READY signal. You will get a sound and a ticket here.</p> : <>
+          <p className="big"><span className={tk.dir === 'CALL' ? 'up' : 'down'}>{tk.dir}</span> {pair.slice(0, 3)}/{pair.slice(3)}</p>
+          <p>Stake <strong>${tk.stake.toFixed(2)}</strong>, expiry <strong>{expiry} GMT</strong> (15 min)</p><p>Entry about {f(tk.entry)}</p>
+          <p>Counter plan: if the Exness stop hits, wait for price at {f(tk.entry + sg * 0.5 * pip)} (entry +0.5 pip, never below entry), then buy a {tk.dir === 'CALL' ? 'PUT' : 'CALL'} for $${tk.stake.toFixed(2)} with the same expiry, at least 1 minute left. One counter at most.</p>
+          <button type="button" className="btn" onClick={() => copy('q', `Quotex: ${tk.dir} ${pair} $${tk.stake.toFixed(2)} expiry ${expiry} GMT entry ${f(tk.entry)}`)}>{copied === 'q' ? 'Copied' : 'Copy Quotex ticket'}</button></>}</section>
+      <section className="panel card block exness"><h2>Exness (hedge)</h2>
+        {!tk ? <p className="empty">The hedge ticket appears together with the binary.</p> : <>
+          <p className="big"><span className={exSide === 'BUY' ? 'up' : 'down'}>{exSide}</span> {tk.lots.toFixed(2)} lots</p>
+          <p>Entry at market about {f(tk.entry)}</p><p>Stop loss <strong>{f(tk.entry + sg * tk.stopPips * pip)}</strong> ({tk.stopPips} pips)</p><p>Take profit <strong>{f(tk.entry - sg * tk.tpPips * pip)}</strong> ({tk.tpPips} pips)</p>
+          <p>Close any open hedge at binary expiry {expiry} GMT. Approx margin ${margin.toFixed(2)} at 1:{app.leverage}.</p>
+          <button type="button" className="btn" onClick={() => copy('e', `Exness: ${exSide} ${pair} ${tk.lots.toFixed(2)} lots SL ${f(tk.entry + sg * tk.stopPips * pip)} TP ${f(tk.entry - sg * tk.tpPips * pip)}`)}>{copied === 'e' ? 'Copied' : 'Copy Exness ticket'}</button></>}</section>
+      {tk && <section className="panel card wide"><h2>Ticket status</h2>{tk.missed ? <p className="down"><strong>MISSED.</strong> Price moved over 0.5 pip or 20 seconds passed. Wait for the next signal.</p> : <><p>Take both trades within <strong>{left.toFixed(0)} s</strong>.</p><div className="bar"><i style={{ width: `${(left / 20) * 100}%` }} /></div></>}
+        <p className="mut">Real trades are placed by you on Quotex and Exness. This site never places orders. Prices here are simulated, so use the live feed (coming) before trading real money.</p></section>}
     </div>
   )
 }

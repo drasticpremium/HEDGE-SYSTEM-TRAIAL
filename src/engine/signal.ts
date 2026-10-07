@@ -98,7 +98,7 @@ export function calculateSignal(inputs: SignalInputs): SignalResult {
       volScore * 0.1 +
       atrScore * 0.1,
   )
-  const score = Math.max(70, weightedScore)
+  const score = weightedScore
 
   const probability = clamp((score / 100) * 0.92, 0.08, 0.95)
   const direction: SignalDirection = momentumBias

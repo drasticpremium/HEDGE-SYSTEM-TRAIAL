@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
+import { liveQuery } from 'dexie'
 import { db, type CycleLogRow } from '../db/db'
 
 export function LogPage() {
   const [rows, setRows] = useState<CycleLogRow[]>([])
 
   useEffect(() => {
-    db.history.orderBy('time').reverse().toArray().then(setRows)
+    const sub = liveQuery(() => db.history.orderBy('time').reverse().toArray()).subscribe({ next: setRows })
+    return () => sub.unsubscribe()
   }, [])
 
   return (

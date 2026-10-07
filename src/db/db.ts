@@ -38,6 +38,7 @@ class HedgeSignalDeskDatabase extends Dexie {
       events: '++id, cycleId, time',
       meta: '&key',
     })
+    this.version(2).stores({}).upgrade((tx) => tx.table('history').filter((r: CycleLogRow) => (r.entry === 1.0842 && r.lots === 0.15) || (r.entry === 1.2712 && r.lots === 0.12)).delete())
   }
 }
 

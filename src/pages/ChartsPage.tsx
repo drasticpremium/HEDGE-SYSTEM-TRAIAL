@@ -1,32 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { type Candle } from '../engine/math'
-import { makeSimFeed } from '../feed/sim'
+import { ensurePair, useTrader } from '../store/trader'
+import { TradingViewChart } from '../components/TradingViewChart'
 import { useAppStore } from '../store/useAppStore'
 
 export function ChartsPage() {
   const pair = useAppStore((state) => state.pair)
   const [timeframe, setTimeframe] = useState<'M1' | 'M5' | 'M15'>('M1')
-  const [candles, setCandles] = useState<Candle[]>([])
-
-  useEffect(() => {
-    const stop = makeSimFeed(pair, (tick) => {
-      const mid = (tick.bid + tick.ask) / 2
-      const minute = Math.floor(tick.t / 60000) * 60000
-      setCandles((prev) => {
-        const last = prev[prev.length - 1]
-        if (!last || last.t !== minute) {
-          return [...prev.slice(-119), { t: minute, o: mid, h: mid, l: mid, c: mid }]
-        }
-        const current = { ...last }
-        current.h = Math.max(current.h, mid)
-        current.l = Math.min(current.l, mid)
-        current.c = mid
-        return [...prev.slice(0, -1), current]
-      })
-    }, 1)
-
-    return () => stop()
-  }, [pair])
+  const candles = useTrader((s) => s.candles[pair]) ?? []
+  useEffect(() => ensurePair(pair), [pair])
 
   const visibleCandles = useMemo(() => {
     const count = timeframe === 'M1' ? 30 : timeframe === 'M5' ? 24 : 16
@@ -82,10 +63,7 @@ export function ChartsPage() {
 
       <section className="panel card wide">
         <h2>TradingView widget</h2>
-        <div className="tv-widget">
-          <strong>Real market data only.</strong>
-          <span>This widget is not connected to the simulated desk feed.</span>
-        </div>
+        <TradingViewChart symbol={`FX:${pair}`} />
       </section>
     </div>
   )

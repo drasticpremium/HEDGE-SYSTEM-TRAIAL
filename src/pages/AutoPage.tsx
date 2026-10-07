@@ -1,126 +1,51 @@
-import { useEffect, useMemo, useState } from 'react'
-import { type Candle } from '../engine/math'
-import { makeSimFeed } from '../feed/sim'
-import { useAppStore } from '../store/useAppStore'
-
-const defaultWatchlist = ['EURUSD', 'GBPUSD', 'AUDUSD']
+import { PAIRS } from '../engine/pairs'
+import { favPips } from '../engine/cycle'
+import { winProbability } from '../engine/math'
+import { useTrader } from '../store/trader'
 
 export function AutoPage() {
-  const pair = useAppStore((state) => state.pair)
-  const [running, setRunning] = useState(false)
-  const [speed, setSpeed] = useState(1)
-  const [seed, setSeed] = useState('seed-001')
-  const [watchlist, setWatchlist] = useState<string[]>(defaultWatchlist)
-  const [events, setEvents] = useState<string[]>([
-    'SIMULATED: feed ready',
-    'WAIT: waiting for a valid setup',
-  ])
-  const [candles, setCandles] = useState<Candle[]>([])
-  const [price, setPrice] = useState(1.0842)
-
-  useEffect(() => {
-    if (!running) return
-
-    const stop = makeSimFeed(pair, (tick) => {
-      const nextPrice = (tick.bid + tick.ask) / 2
-      setPrice(nextPrice)
-      const minute = Math.floor(tick.t / 60000) * 60000
-      setCandles((prev) => {
-        const last = prev[prev.length - 1]
-        if (!last || last.t !== minute) {
-          return [...prev.slice(-119), { t: minute, o: nextPrice, h: nextPrice, l: nextPrice, c: nextPrice }]
-        }
-        const current = { ...last }
-        current.h = Math.max(current.h, nextPrice)
-        current.l = Math.min(current.l, nextPrice)
-        current.c = nextPrice
-        return [...prev.slice(0, -1), current]
-      })
-
-      if (Math.random() > 0.7) {
-        setEvents((prev) => [`SIMULATED: ${pair} tick ${nextPrice.toFixed(5)}`, ...prev].slice(0, 8))
-      }
-    }, speed)
-
-    return () => stop()
-  }, [running, pair, speed])
-
-  const status = useMemo(() => (running ? 'RUNNING' : 'PAUSED'), [running])
-
-  const togglePair = (next: string) => {
-    setWatchlist((prev) =>
-      prev.includes(next) ? prev.filter((item) => item !== next) : [...prev, next],
-    )
-  }
-
-  const startTrader = () => {
-    setRunning(true)
-    setEvents((prev) => ['START: auto paper trader engaged', ...prev].slice(0, 8))
-  }
-
-  const pauseTrader = () => {
-    setRunning(false)
-    setEvents((prev) => ['PAUSE: awaiting next trigger', ...prev].slice(0, 8))
-  }
-
-  const stopTrader = () => {
-    setRunning(false)
-    setCandles([])
-    setEvents(['STOP: simulation stopped', ...events].slice(0, 8))
-  }
-
+  const t = useTrader()
+  const c = t.cycle
+  const fav = c ? favPips(c, t.prices[c.pair]) : 0
+  const mins = c ? Math.max(0, (c.expiryT - t.simT) / 60000) : 0
+  const p = c ? winProbability(fav, Math.max(1, c.stopPips / 1.25), mins) : 0
+  const toggle = (x: string) => t.set({ watchlist: t.watchlist.includes(x) ? t.watchlist.filter((i) => i !== x) : [...t.watchlist, x] })
   return (
     <div className="page-grid">
       <section className="panel card">
         <h2>Auto Paper Trader</h2>
         <div className="button-row">
-          <button type="button" onClick={startTrader}>Start</button>
-          <button type="button" onClick={pauseTrader}>Pause</button>
-          <button type="button" onClick={stopTrader}>Stop</button>
+          <button type="button" onClick={() => t.set({ running: !t.running })}>{t.running ? 'Pause' : 'Start'}</button>
         </div>
         <div className="field-row">
-          <label>
-            Speed
-            <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
-              <option value={1}>1x</option>
-              <option value={5}>5x</option>
-              <option value={15}>15x</option>
-              <option value={60}>60x</option>
-            </select>
+          <label>Speed
+            <select value={t.speed} onChange={(e) => t.set({ speed: Number(e.target.value) })}>{[1, 5, 15, 60].map((s) => <option key={s} value={s}>{s}x</option>)}</select>
           </label>
-          <label>
-            Seed
-            <input value={seed} onChange={(e) => setSeed(e.target.value)} />
-          </label>
+          <label><input type="checkbox" checked={t.respectSession} onChange={(e) => t.set({ respectSession: e.target.checked })} /> Only trade 08:00-17:00 GMT (sim clock)</label>
         </div>
-        <p>Status: <strong>{status}</strong></p>
-        <p>Current pair: {pair}</p>
-        <p>Price: {price.toFixed(pair.endsWith('JPY') ? 3 : 5)}</p>
+        <p>Status: <strong>{t.running ? 'RUNNING' : 'PAUSED'}</strong> | Sim clock {new Date(t.simT).toISOString().slice(11, 19)} GMT</p>
+        <p>{t.status}</p>
+        <p>Cycles this session: {t.sessionCycles}. SIMULATED data on a random walk, so results only test the machinery. It runs while this site is open in a tab.</p>
       </section>
-
+      <section className="panel card">
+        <h2>Active cycle</h2>
+        {!c ? <p>No open cycle. The trader opens one when every condition is green.</p> : (
+          <div>
+            <p><strong>{c.pair} {c.dir}</strong>, strength {c.strength}</p>
+            <p>Quotex: {c.dir} ${c.stake.toFixed(2)}, entry {c.entry.toFixed(5)}, {mins.toFixed(1)} min left</p>
+            <p>Exness: {c.dir === 'CALL' ? 'SELL' : 'BUY'} {c.lots} lots, stop {c.stopPips}p, TP {c.tpPips}p {c.stopHit ? '(stop HIT)' : c.tpHit ? '(TP HIT)' : ''}</p>
+            <p>Counter: {c.counterState}. Binary {fav >= 0 ? 'winning' : 'losing'} by {Math.abs(fav).toFixed(1)} pips.</p>
+            <p>Model estimate of binary finishing in the money: {(p * 100).toFixed(0)}%</p>
+          </div>
+        )}
+      </section>
       <section className="panel card">
         <h2>Pair watchlist</h2>
-        <div className="watchlist">
-          {['EURUSD', 'GBPUSD', 'AUDUSD', 'USDJPY', 'NZDUSD'].map((item) => (
-            <label key={item} className="watch-item">
-              <input
-                type="checkbox"
-                checked={watchlist.includes(item)}
-                onChange={() => togglePair(item)}
-              />
-              {item}
-            </label>
-          ))}
-        </div>
+        <div className="watchlist">{PAIRS.map((x) => <label key={x} className="watch-item"><input type="checkbox" checked={t.watchlist.includes(x)} onChange={() => toggle(x)} />{x}</label>)}</div>
       </section>
-
       <section className="panel card wide">
         <h2>Event stream</h2>
-        <ul className="event-stream">
-          {events.map((event) => (
-            <li key={`${event}-${Math.random()}`}>{event}</li>
-          ))}
-        </ul>
+        <ul className="event-stream">{t.events.map((e, i) => <li key={i}>{e}</li>)}</ul>
       </section>
     </div>
   )

@@ -1,42 +1,40 @@
-import { useAppStore } from '../store/useAppStore'
+import { Link } from 'react-router-dom'
+import { formatMoney, useAppStore } from '../store/useAppStore'
+import { useTrader } from '../store/trader'
+import { useCycles } from '../db/useCycles'
+import { cumulative, currentStreak } from '../engine/stats'
+import { EquityChart } from '../components/EquityChart'
+import { pipSize } from '../engine/pairs'
 
 export function OverviewPage() {
-  const currencyUnit = useAppStore((state) => state.currencyUnit)
-  const ghcPerUsd = useAppStore((state) => state.ghcPerUsd)
-  const binaryBalanceUsd = useAppStore((state) => state.binaryBalanceUsd)
-  const exnessBalanceUsd = useAppStore((state) => state.exnessBalanceUsd)
-
+  const a = useAppStore(), t = useTrader(), rows = useCycles() ?? []
+  const m = (v: number) => formatMoney(v, a.currencyUnit, a.ghcPerUsd)
+  const total = rows.reduce((x, r) => x + r.netPnl, 0), wins = rows.filter((r) => r.netPnl > 0).length
+  const today = rows.filter((r) => Date.now() - new Date(r.time).getTime() < 86400000).reduce((x, r) => x + r.netPnl, 0)
+  const equity = a.binaryBalanceUsd + a.exnessBalanceUsd
+  const kpi = (label: string, value: string, tone = '') => <div className="kpi"><span>{label}</span><strong className={tone}>{value}</strong></div>
   return (
     <div className="page-grid">
-      <section className="panel card">
-        <h2>Overview</h2>
-        <div className="stat-grid">
-          <div className="stat-box">
-            <span>Binary account</span>
-            <strong>{currencyUnit === 'GH₵' ? `GH₵${(binaryBalanceUsd * ghcPerUsd).toFixed(2)}` : `$${binaryBalanceUsd.toFixed(2)}`}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Exness account</span>
-            <strong>{currencyUnit === 'GH₵' ? `GH₵${(exnessBalanceUsd * ghcPerUsd).toFixed(2)}` : `$${exnessBalanceUsd.toFixed(2)}`}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Combined equity</span>
-            <strong>{currencyUnit === 'GH₵' ? `GH₵${((binaryBalanceUsd + exnessBalanceUsd) * ghcPerUsd).toFixed(2)}` : `$${(binaryBalanceUsd + exnessBalanceUsd).toFixed(2)}`}</strong>
-          </div>
+      <section className="hero wide">
+        <div>
+          <h1>Trade the hedge. Prove it with data.</h1>
+          <p>Your paper account runs a Quotex binary and an opposite Exness hedge on every clean signal, and logs each cycle so the edge is measured, not guessed.</p>
+          <div className="button-row"><Link className="btn primary" to="/desk">Open Live Desk</Link><Link className="btn" to="/auto">Watch auto trader</Link><Link className="btn" to="/log">View trade log</Link></div>
         </div>
+        <svg viewBox="0 0 220 140" className="hero-art" aria-hidden="true">
+          {[20, 52, 84, 116, 148, 180].map((x, i) => { const up = i % 2 === 0, h = 30 + ((i * 17) % 40), y = 90 - h / 2 - (i * 4) % 20; return <g key={x}><line x1={x + 8} x2={x + 8} y1={y - 12} y2={y + h + 12} stroke="var(--mut)" /><rect x={x} y={y} width="16" height={h} rx="3" fill={up ? 'var(--ok)' : 'var(--bad)'} /></g> })}
+          <path d="M10 112 Q70 30 110 70 T210 24" fill="none" stroke="var(--ac)" strokeWidth="3" strokeLinecap="round" />
+        </svg>
       </section>
-
-      <section className="panel card">
-        <h2>Auto trader</h2>
-        <p>Running status: paused</p>
-        <p>Current cycle: none</p>
-        <p>Next signal state: waiting for the next valid setup</p>
+      <section className="panel card wide kpis">
+        {kpi('Combined balance', m(equity))}{kpi('Binary account', m(a.binaryBalanceUsd))}{kpi('Exness account', m(a.exnessBalanceUsd))}
+        {kpi('Total P&L', m(total), total >= 0 ? 'up' : 'down')}{kpi('Last 24h', m(today), today >= 0 ? 'up' : 'down')}
+        {kpi('Cycles', String(rows.length))}{kpi('Win rate (net)', rows.length ? `${((wins / rows.length) * 100).toFixed(0)}%` : 'no data')}{kpi('Streak', rows.length ? String(currentStreak(rows)) : '0')}
       </section>
-
-      <section className="panel card wide">
-        <h2>Performance snapshot</h2>
-        <div className="mini-chart" aria-label="Combined equity curve placeholder" />
-      </section>
+      <section className="panel card wide"><h2>Equity curve (net P&L, USD)</h2><EquityChart series={[{ name: 'Net', color: 'var(--ac)', values: cumulative(rows.map((r) => r.netPnl)) }]} /></section>
+      <section className="panel card"><h2>Auto trader</h2><p><strong>{t.running ? 'Running' : 'Paused'}</strong>. {t.status}</p>
+        <p>{t.cycle ? `Open: ${t.cycle.pair} ${t.cycle.dir}, entry ${t.cycle.entry.toFixed(5)}` : 'No open cycle.'}</p><p className="mut">Data is simulated. Edge is not proven until 300 live cycles are logged.</p></section>
+      <section className="panel card"><h2>Live prices</h2><table className="log-table"><tbody>{t.watchlist.map((p) => <tr key={p}><td>{p}</td><td>{t.prices[p]?.toFixed(pipSize(p) === 0.01 ? 3 : 5) ?? '...'}</td></tr>)}</tbody></table></section>
     </div>
   )
 }

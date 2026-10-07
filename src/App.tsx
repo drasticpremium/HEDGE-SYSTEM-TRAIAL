@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
-import { seedHistoryIfEmpty } from './db/db'
+import './store/trader'
 import { AboutPage } from './pages/AboutPage'
 import { AccuracyPage } from './pages/AccuracyPage'
 import { AutoPage } from './pages/AutoPage'
@@ -23,7 +23,7 @@ export default function App() {
 
   useEffect(() => {
     document.title = 'Hedge Signal Desk'
-    void seedHistoryIfEmpty()
+    
   }, [])
 
   return (
