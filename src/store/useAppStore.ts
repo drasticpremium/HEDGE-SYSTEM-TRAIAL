@@ -36,8 +36,8 @@ const initialState: AppSettings = {
   clockMode: 'sim',
   currencyUnit: 'GH₵',
   ghcPerUsd: 11,
-  binaryBalanceUsd: 250,
-  exnessBalanceUsd: 250,
+  binaryBalanceUsd: 250 / 11,
+  exnessBalanceUsd: 250 / 11,
   leverage: 500,
   stopOutPercent: 20,
   commissionPerLotRoundTrip: 9,
@@ -55,7 +55,7 @@ export const useAppStore = create<AppState>()(
       setClockMode: (clockMode) => set({ clockMode }),
       setCurrencyUnit: (currencyUnit) => set({ currencyUnit }),
       setGhcPerUsd: (ghcPerUsd) => set({ ghcPerUsd }),
-      resetAccounts: () => set({ binaryBalanceUsd: 250, exnessBalanceUsd: 250 }),
+      resetAccounts: () => set({ binaryBalanceUsd: 250 / 11, exnessBalanceUsd: 250 }),
       setAccountBalance: (account, value) =>
         set((state) => ({
           ...(account === 'binary'

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import { atr, realizedVol15, sizing, type Candle } from '../engine/math'
+import type { Candle } from '../engine/math'
 import { defaultVol15, pipSize, pipValuePerLot, startPrice } from '../engine/pairs'
-import { calculateSignal } from '../engine/signal'
+import { evaluateSignal, isTradingSession } from '../engine/evaluate'
 import { step, type Cycle } from '../engine/cycle'
 import { sessionMult } from '../feed/sim'
 import { isSessionOpen } from '../engine/clock'
@@ -40,24 +40,12 @@ const push = (msg: string, cycleId?: number) => {
   useTrader.setState((s) => ({ events: [`${new Date(M.simT).toISOString().slice(11, 19)} ${msg}`, ...s.events].slice(0, 40) }))
   void addEventRow({ cycleId, time: new Date(M.simT).toISOString(), message: msg, level: 'info' })
 }
-export function evaluate(pair: string, simT: number) {
+export function evaluate(pair: string, simT: number, live?: { m1: Candle[]; price: number }) {
   const app = useAppStore.getState(), tr = useTrader.getState()
-  const m1 = M.candles[pair], price = M.prices[pair]
-  if (!m1 || !price || m1.length < 15) return null
-  const pip = pipSize(pair), vol = Math.max(1, realizedVol15(m1.slice(-60).map((c) => c.c), pip) ?? defaultVol15(pair)), a = atr(m1, 14)
-  const session = !tr.respectSession || isSessionOpen(simT), spread = 0.6
-  const sig = calculateSignal({ pair, price, m1, spreadPips: spread, atrPips: a ? a / pip : vol / 3, vol15: vol, sessionOpen: session })
-  const stake = Math.max(app.minimumBinaryStake, (app.binaryBalanceUsd * app.binaryStakePercent) / 100)
-  const sz = sizing(vol, stake * app.hedgeRiskRatio, pipValuePerLot(pair))
-  const reasons: string[] = []
-  if (!session) reasons.push('Session closed (08:00-17:00 GMT)')
-  if (tr.news) reasons.push('News nearby switch is on')
-  if (spread > 1.4) reasons.push('Spread too wide')
-  if (vol < 1.5 || vol > 8) reasons.push(`Volatility ${vol.toFixed(1)} pips is outside the normal 1.5-8 range`)
-  if (sig.strength < 60) reasons.push(`Strength ${sig.strength} is below 60`)
-  else if (!sig.ready) reasons.push('Trend and momentum disagree')
-  if (app.binaryBalanceUsd < stake) reasons.push('Balance below minimum stake')
-  return { vol, spread, sig, stake, sz, session, price, pip, reasons, ready: reasons.length === 0 && sig.ready }
+  const m1 = live?.m1 ?? M.candles[pair], price = live?.price ?? M.prices[pair]
+  if (!m1 || !price) return null
+  const session = live ? isTradingSession(simT) : !tr.respectSession || isSessionOpen(simT)
+  return evaluateSignal({ pair, m1, price, session, news: tr.news, balanceUsd: app.binaryBalanceUsd, stakePct: app.binaryStakePercent, minStake: app.minimumBinaryStake, hedgeRiskRatio: app.hedgeRiskRatio })
 }
 const lastKind: Record<string, { kind: string; id: number; skipped: number }> = {}, inits: Record<string, Promise<void>> = {}
 /** One row per tradable candle. Consecutive no-trade candles share ONE red row until a candle is tradable again. */

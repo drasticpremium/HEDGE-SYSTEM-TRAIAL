@@ -11,6 +11,7 @@ import { LogPage } from './pages/LogPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { PerformancePage } from './pages/PerformancePage'
+import { ServerPage } from './pages/ServerPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { useAppStore } from './store/useAppStore'
 
@@ -33,6 +34,7 @@ export default function App() {
           <Route index element={<OverviewPage />} />
           <Route path="/desk" element={<DeskPage />} />
           <Route path="/auto" element={<AutoPage />} />
+          <Route path="/server" element={<ServerPage />} />
           <Route path="/charts" element={<ChartsPage />} />
           <Route path="/log" element={<LogPage />} />
           <Route path="/performance" element={<PerformancePage />} />

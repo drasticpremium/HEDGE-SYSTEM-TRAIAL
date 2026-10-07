@@ -6,7 +6,7 @@ import { useAppStore, type ThemeName } from '../store/useAppStore'
 import { useTrader } from '../store/trader'
 
 const navItems = [
-  ['/', 'Overview', 'home'], ['/desk', 'Live Desk', 'desk'], ['/auto', 'Auto', 'auto'], ['/charts', 'Charts', 'charts'], ['/log', 'Log', 'log'],
+  ['/', 'Overview', 'home'], ['/desk', 'Live Desk', 'desk'], ['/auto', 'Auto', 'auto'], ['/server', '24/7 Server', 'server'], ['/charts', 'Charts', 'charts'], ['/log', 'Log', 'log'],
   ['/performance', 'Performance', 'performance'], ['/accuracy', 'Accuracy', 'accuracy'], ['/settings', 'Settings', 'settings'], ['/about', 'About', 'about'],
 ] as const
 const THEMES: ThemeName[] = ['midnight', 'emerald', 'amber', 'violet', 'light', 'contrast']

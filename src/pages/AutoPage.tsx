@@ -2,6 +2,7 @@ import { PAIRS } from '../engine/pairs'
 import { favPips } from '../engine/cycle'
 import { winProbability } from '../engine/math'
 import { useTrader } from '../store/trader'
+import { TradeChart, cycleLevels } from '../components/TradeChart'
 
 export function AutoPage() {
   const t = useTrader()
@@ -42,6 +43,10 @@ export function AutoPage() {
       <section className="panel card">
         <h2>Pair watchlist</h2>
         <div className="watchlist">{PAIRS.map((x) => <label key={x} className="watch-item"><input type="checkbox" checked={t.watchlist.includes(x)} onChange={() => toggle(x)} />{x}</label>)}</div>
+      </section>
+      <section className="panel card wide">
+        <h2>Trade chart (simulated feed): entry, stop, take profit, counter trigger</h2>
+        <TradeChart candles={t.candles[c?.pair ?? t.watchlist[0]] ?? []} levels={c ? cycleLevels(c) : []} digits={(c?.pair ?? t.watchlist[0] ?? "").endsWith("JPY") ? 3 : 5} />
       </section>
       <section className="panel card wide">
         <h2>Event stream</h2>

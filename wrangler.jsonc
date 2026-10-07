@@ -1,8 +1,10 @@
 {
   "name": "hedge-signal-desk",
+  "main": "src/worker/index.ts",
   "compatibility_date": "2025-09-01",
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
+  "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "durable_objects": { "bindings": [{ "name": "ENGINE", "class_name": "Engine" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Engine"] }],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": { "PAIRS": "EURUSD" }
 }
