@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { ErrorBoundary } from './ErrorBoundary'
 import { Logo } from './Logo'
 import { Icon } from './Icon'
 import { PAIRS } from '../engine/pairs'
@@ -14,7 +15,7 @@ const THEMES: ThemeName[] = ['midnight', 'emerald', 'amber', 'violet', 'light', 
 const DISCLAIMER = 'Educational tool, paper trading only, not financial advice. Binary options and leveraged forex carry a high risk of loss.'
 
 export function Layout() {
-  const s = useAppStore(), running = useTrader((t) => t.running), cycle = useTrader((t) => t.cycle)
+  const loc = useLocation(), s = useAppStore(), running = useTrader((t) => t.running), cycle = useTrader((t) => t.cycle)
   return (
     <div className="app-shell">
       <NotifyWatcher /><Toasts />
@@ -33,7 +34,7 @@ export function Layout() {
             <select aria-label="Theme" value={s.theme} onChange={(e) => s.setTheme(e.target.value as ThemeName)}>{THEMES.map((t) => <option key={t}>{t}</option>)}</select>
           </div>
         </header>
-        <main className="page-content"><Outlet /></main>
+        <main className="page-content"><ErrorBoundary resetKey={loc.pathname}><Outlet /></ErrorBoundary></main>
         <footer className="app-footer">{DISCLAIMER}</footer>
       </div>
       <nav className="bottom-nav" aria-label="Pages">{navItems.map(([to, label, icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `bn-item ${isActive ? 'active' : ''}`}><Icon name={icon} size={22} /><span>{label}</span></NavLink>)}</nav>

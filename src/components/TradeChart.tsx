@@ -23,8 +23,11 @@ export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: {
   useEffect(() => {
     const s = series.current; if (!s || !last) return
     const row = (k: Candle) => ({ time: sec(k.t), open: k.o, high: k.h, low: k.l, close: k.c }), p = prev.current
-    if (p.n && candles.length - p.n <= 1 && candles[candles.length - (candles.length - p.n) - 1]?.t === p.t) candles.slice(-2).forEach((k) => s.update(row(k)))
-    else { s.setData(candles.map(row)); chart.current?.timeScale().fitContent() }
+    try {
+      if (p.n && candles.length === p.n && last.t === p.t) s.update(row(last))
+      else if (p.n && candles.length === p.n + 1 && candles[candles.length - 2].t === p.t) { s.update(row(candles[candles.length - 2])); s.update(row(last)) }
+      else { s.setData(candles.map(row)); chart.current?.timeScale().fitContent() }
+    } catch { s.setData(candles.map(row)) }
     prev.current = { n: candles.length, t: last.t }
   }, [last?.t, last?.c, last?.h, last?.l, candles.length, digits])
   const key = levels.map((l) => l.label + l.price).join('|')
@@ -35,6 +38,7 @@ export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: {
   useEffect(() => { if (!box) return; const i = setInterval(() => force((n) => n + 1), 250); return () => clearInterval(i) }, [box])
   let rect: JSX.Element | null = null
   const c = chart.current, s = series.current
+  try {
   if (box && c && s && candles.length > 1) {
     const ts = c.timeScale(), a = candles[candles.length - 1], b = candles[candles.length - 2], xa = ts.timeToCoordinate(sec(a.t)), xb = ts.timeToCoordinate(sec(b.t))
     if (xa !== null && xb !== null) {
@@ -49,5 +53,6 @@ export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: {
       }
     }
   }
+  } catch { rect = null }
   return <div style={{ position: 'relative', height, width: '100%' }}><div ref={el} style={{ position: 'absolute', inset: 0 }} /><div className="tv-overlay">{rect}</div></div>
 }
