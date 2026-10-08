@@ -504,3 +504,13 @@ select, .ghost { background: var(--card); color: var(--tx); border: 1px solid va
 .meter { display: inline-block; width: 90px; height: 8px; background: var(--bd); border-radius: 6px; overflow: hidden; } .meter i { display: block; height: 100%; background: var(--ok); }
 .sig-split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .sig-side { background: var(--card); border-radius: 10px; padding: 10px 12px; } .sig-side h4 { margin: 0 0 8px; color: var(--mut); font-weight: 600; }
 @media (max-width: 700px) { .sig-split { grid-template-columns: 1fr; } .tv-frame { height: 60vh; } }
+
+/* ---- v5: position boxes, toasts ---- */
+.tv-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.tv-box { position: absolute; font-size: 11px; color: #fff; padding: 2px 6px; box-sizing: border-box; } .tv-box span { background: rgba(0,0,0,.45); padding: 1px 5px; border-radius: 3px; }
+.tv-profit { background: rgba(46,204,143,.28); border: 1px solid #2ecc8f; } .tv-loss { background: rgba(255,109,122,.28); border: 1px solid #ff6d7a; }
+.tv-entry { position: absolute; border-top: 2px solid #5ea0ff; font-size: 11px; color: #fff; } .tv-entry span { position: absolute; top: -20px; left: 0; background: #2f7bff; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.toasts { position: fixed; top: 12px; right: 12px; z-index: 50; display: grid; gap: 8px; width: min(360px, calc(100vw - 24px)); }
+.toast { background: var(--card); border: 1px solid var(--bd); border-left: 5px solid var(--ac); border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35); cursor: pointer; animation: fadein .25s ease; } .toast p { margin: 4px 0 0; color: var(--mut); white-space: pre-line; }
+.toast-ok { border-left-color: var(--ok); } .toast-bad { border-left-color: var(--bad); }
+.steps { padding-left: 20px; display: grid; gap: 6px; } code { background: var(--card-soft); padding: 1px 6px; border-radius: 4px; }

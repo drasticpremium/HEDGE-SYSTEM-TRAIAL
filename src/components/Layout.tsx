@@ -4,9 +4,10 @@ import { Icon } from './Icon'
 import { PAIRS } from '../engine/pairs'
 import { useAppStore, type ThemeName } from '../store/useAppStore'
 import { useTrader } from '../store/trader'
+import { NotifyWatcher, Toasts } from './NotifyWatcher'
 
 const navItems = [
-  ['/', 'Overview', 'home'], ['/desk', 'Live Desk', 'desk'], ['/auto', 'Auto', 'auto'], ['/server', '24/7 Server', 'server'], ['/charts', 'Charts', 'charts'], ['/log', 'Log', 'log'],
+  ['/', 'Overview', 'home'], ['/desk', 'Live Desk', 'desk'], ['/auto', 'Auto', 'auto'], ['/server', '24/7 Server', 'server'], ['/alerts', 'Alerts', 'bell'], ['/charts', 'Charts', 'charts'], ['/log', 'Log', 'log'],
   ['/performance', 'Performance', 'performance'], ['/accuracy', 'Accuracy', 'accuracy'], ['/settings', 'Settings', 'settings'], ['/about', 'About', 'about'],
 ] as const
 const THEMES: ThemeName[] = ['midnight', 'emerald', 'amber', 'violet', 'light', 'contrast']
@@ -16,6 +17,7 @@ export function Layout() {
   const s = useAppStore(), running = useTrader((t) => t.running), cycle = useTrader((t) => t.cycle)
   return (
     <div className="app-shell">
+      <NotifyWatcher /><Toasts />
       <aside className="sidebar">
         <div className="sidebar-top"><Logo /></div>
         <nav className="nav">{navItems.map(([to, label, icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}><Icon name={icon} />{label}</NavLink>)}</nav>

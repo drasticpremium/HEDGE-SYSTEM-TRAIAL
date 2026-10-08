@@ -8,7 +8,7 @@ import type { Candle } from '../engine/math'
 import { Pill } from '../components/Pill'
 import { useAppStore } from '../store/useAppStore'
 
-interface Ticket { dir: 'CALL' | 'PUT'; entry: number; t: number; strength: number; stake: number; lots: number; stopPips: number; tpPips: number; missed: boolean }
+interface Ticket { ct: number; dir: 'CALL' | 'PUT'; entry: number; t: number; strength: number; stake: number; lots: number; stopPips: number; tpPips: number; missed: boolean }
 const beep = () => { try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 880; o.start(); o.stop(c.currentTime + 0.25) } catch { /* sound blocked */ } }
 const hms = (t: number) => new Date(t).toISOString().slice(11, 19)
 
@@ -26,7 +26,7 @@ export function DeskPage() {
   useEffect(() => {
     if (!calc || !price) return
     const tk = tRef.current
-    if (!tk && ready) { setTicket({ dir: calc.sig.direction, entry: price, t: Date.now(), strength: calc.sig.strength, stake: calc.stake, lots: calc.sz.lots, stopPips: calc.sz.stopPips, tpPips: calc.sz.tpPips, missed: false }); beep(); document.title = 'SIGNAL READY - Hedge Signal Desk' }
+    if (!tk && ready) { setTicket({ ct: m1[m1.length - 1].t, dir: calc.sig.direction, entry: price, t: Date.now(), strength: calc.sig.strength, stake: calc.stake, lots: calc.sz.lots, stopPips: calc.sz.stopPips, tpPips: calc.sz.tpPips, missed: false }); beep(); document.title = 'SIGNAL READY - Hedge Signal Desk' }
     else if (tk && !tk.missed && (Date.now() - tk.t > win * 1000 || Math.abs(price - tk.entry) / pip > 0.5)) setTicket({ ...tk, missed: true })
     else if (tk && tk.missed && !ready) { setTicket(null); document.title = 'Hedge Signal Desk' }
   }, [price, ready])
@@ -63,7 +63,7 @@ export function DeskPage() {
           <button type="button" className="btn" onClick={() => copy('e', `Exness: ${exSide} ${pair} ${tk.lots.toFixed(2)} lots SL ${f(tk.entry + sg * tk.stopPips * pip)} TP ${f(tk.entry - sg * tk.tpPips * pip)}`)}>{copied === 'e' ? 'Copied' : 'Copy Exness ticket'}</button></>}</section>
       {tk && <section className="panel card wide"><h2>Ticket status</h2>{tk.missed ? <p className="down"><strong>MISSED.</strong> Price moved over 0.5 pip or the time window passed. Wait for the next signal.</p> : <><p>Take both trades within <strong>{left.toFixed(0)} s</strong>.</p><div className="bar"><i style={{ width: `${(left / win) * 100}%` }} /></div></>}
         <p className="mut">Real trades are placed by you on Quotex and Exness. This site never places orders. Prices here are simulated, so use the live feed (coming) before trading real money.</p></section>}
-      <section className="panel card wide"><h2>{pair} trade chart {useLive ? '(live)' : '(simulated)'}</h2><TradeChart candles={m1} digits={dp} levels={tk && !tk.missed ? [{ price: tk.entry, label: 'Entry', color: '#5ea0ff' }, { price: tk.entry + sg * tk.stopPips * pip, label: 'Exness stop', color: '#ff6d7a' }, { price: tk.entry - sg * tk.tpPips * pip, label: 'Exness TP', color: '#2ecc8f' }, { price: tk.entry + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : []} /></section>
+      <section className="panel card wide"><h2>{pair} trade chart {useLive ? '(live)' : '(simulated)'}</h2><TradeChart candles={m1} digits={dp} box={tk && !tk.missed ? { t0: tk.ct, t1: tk.ct + 15 * 60000, entry: tk.entry, sl: tk.entry + sg * tk.stopPips * pip, tp: tk.entry - sg * tk.tpPips * pip, slPips: tk.stopPips, tpPips: tk.tpPips, quotex: tk.dir === 'CALL' ? 'BUY' : 'SELL' } : null} levels={tk && !tk.missed ? [{ price: tk.entry, label: 'Entry', color: '#5ea0ff' }, { price: tk.entry + sg * tk.stopPips * pip, label: 'Exness stop', color: '#ff6d7a' }, { price: tk.entry - sg * tk.tpPips * pip, label: 'Exness TP', color: '#2ecc8f' }, { price: tk.entry + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : []} /></section>
       <SignalHistory pair={pair} />
     </div>
   )

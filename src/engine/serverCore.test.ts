@@ -12,3 +12,15 @@ describe('24/7 server engine core', () => {
   it('balances move by exactly the sum of cycle P&L', () => expect(s.binary + s.exness - 2 * START_USD).toBeCloseTo(s.cycles.reduce((x, c) => x + c.netPnl, 0), 1))
   it('ignores duplicate or old candles', () => { const n = s.candles.EURUSD.length; processCandle(s, 'EURUSD', s.candles.EURUSD[0]); expect(s.candles.EURUSD.length).toBe(n) })
 })
+import { summaryText, signalMessage, cycleMessage } from './serverCore'
+describe('notification text', () => {
+  it('hourly report counts only the last hour', () => {
+    const now = Date.UTC(2026, 9, 6, 12, 0), mk = (mins: number, net: number) => ({ id: mins, time: new Date(now - mins * 60000).toISOString(), pair: 'EURUSD', direction: 'CALL' as const, entry: 1, strength: 70, stake: 1, lots: 0.01, binaryResult: 'WIN' as const, exnessResult: 0, costs: 0, netPnl: net, outcomeTag: 'x', source: 'live' as const })
+    const t = summaryText([mk(10, 2), mk(50, -1), mk(120, 5)], 22, 22, now, 11)
+    expect(t).toContain('Last hour: 2 cycles, +$1.00'); expect(t).toContain('Today: 3 cycles, +$6.00')
+  })
+  it('signal message shows buy/sell, stop and take profit', () => {
+    const m = signalMessage({ time: '2026-10-06T10:00:00.000Z', pair: 'EURUSD', kind: 'TRADE', dir: 'PUT', price: 1.1, strength: 72, vol: 3, stake: 1, lots: 0.01, hedgeSide: 'BUY', sl: 1.0996, tp: 1.1006, stopPips: 4, tpPips: 6, expiry: '2026-10-06T10:15:00.000Z', reasons: [], skipped: 0 })
+    expect(m).toContain('SELL (PUT)'); expect(m).toContain('Exness: BUY'); expect(m).toContain('Stop loss 1.09960'); expect(cycleMessage({ id: 1, time: '', pair: 'EURUSD', direction: 'PUT', entry: 1, strength: 1, stake: 1, lots: 1, binaryResult: 'WIN', exnessResult: 0, costs: 0, netPnl: -2.5, outcomeTag: 'stop hit', source: 'live' })).toContain('-$2.50')
+  })
+})

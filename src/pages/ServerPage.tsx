@@ -3,7 +3,7 @@ import { useServer } from '../store/server'
 import { formatMoney, useAppStore } from '../store/useAppStore'
 import { favPips } from '../engine/cycle'
 import { SignalCards } from '../components/SignalHistory'
-import { TradeChart, cycleLevels } from '../components/TradeChart'
+import { TradeChart, cycleLevels, cycleBox } from '../components/TradeChart'
 
 export function ServerPage() {
   const { data, error, control } = useServer(), a = useAppStore()
@@ -25,7 +25,7 @@ export function ServerPage() {
         {kpi('Net P&L (last 400)', m(net), net >= 0 ? 'up' : 'down')}{kpi('Cycles', String(data.cycles.length))}{kpi('Binary win rate', data.cycles.length ? `${((wins / data.cycles.length) * 100).toFixed(0)}%` : 'no data')}
       </section>
       <section className="panel card wide"><h2>{pair} live chart{c ? `: open ${c.dir}, ${favPips(c, data.prices[pair]).toFixed(1)} pips in favour` : ''}</h2>
-        <TradeChart candles={data.candles[pair] ?? []} levels={c ? cycleLevels(c) : []} digits={pair.endsWith('JPY') ? 3 : 5} /></section>
+        <TradeChart candles={data.candles[pair] ?? []} levels={c ? cycleLevels(c) : []} box={c ? cycleBox(c) : null} digits={pair.endsWith('JPY') ? 3 : 5} /></section>
       <section className="panel card wide"><h2>Controls</h2>
         <p className="mut">Anyone can view this page. Changing things needs the ADMIN_TOKEN you set in Cloudflare.</p>
         <div className="button-row"><input type="password" placeholder="Admin token" value={token} onChange={(e) => setToken(e.target.value)} />
