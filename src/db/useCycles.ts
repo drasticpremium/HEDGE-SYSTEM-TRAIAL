@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
-import { liveQuery } from 'dexie'
-import { db, type CycleLogRow } from './db'
-/** Live list of logged cycles, oldest first. Re-renders whenever the trader writes a new row. */
+import { useMemo } from 'react'
+import { useServer } from '../store/server'
+import type { CycleLogRow } from './db'
+/** Logged cycles from the 24/7 server (real market data, paper money), oldest first. Null while loading. */
 export function useCycles(): CycleLogRow[] | null {
-  const [rows, setRows] = useState<CycleLogRow[] | null>(null)
-  useEffect(() => { const s = liveQuery(() => db.history.orderBy('time').toArray()).subscribe({ next: setRows }); return () => s.unsubscribe() }, [])
-  return rows
+  const d = useServer((s) => s.data)
+  return useMemo(() => (d ? [...d.cycles].reverse() : null), [d])
 }

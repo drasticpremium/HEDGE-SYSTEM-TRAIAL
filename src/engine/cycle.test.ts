@@ -4,7 +4,7 @@ const mk = (dir: Dir = 'CALL'): Cycle => ({ id: 1, pair: 'EURUSD', dir, entry: 1
 // run prices then a final price at expiry; mirror=true flips prices around entry for PUT
 const run = (dir: Dir, prices: number[], end: number) => {
   const c = mk(dir), f = (p: number) => (dir === 'CALL' ? p : 2.2 - p)
-  prices.forEach((p, i) => step(c, f(p), (i + 1) * 1000))
+  prices.forEach((p, i) => step(c, f(p), 600000 + (i + 1) * 1000)) // counter window is the last 5 minutes
   return step(c, f(end), 900000).settled!
 }
 for (const dir of ['CALL', 'PUT'] as Dir[]) describe(`cycle state machine (${dir})`, () => {
@@ -14,9 +14,15 @@ for (const dir of ['CALL', 'PUT'] as Dir[]) describe(`cycle state machine (${dir
   it('stop, counter above entry, outside band = -12.30', () => expect(run(dir, [1.1005, 1.10004], 1.101).net).toBe(-12.3))
   it('stop, counter, ends inside band (both win) = +85.20', () => expect(run(dir, [1.1005, 1.10004], 1.10002).net).toBe(85.2))
   it('price below entry before counter: no counter, binary loses = -59.80', () => expect(run(dir, [1.1005, 1.0999], 1.0999).net).toBe(-59.8))
-  it('max one counter and none under 1 minute left', () => {
+  it('no counter with under 1 minute left', () => {
     const c = mk(dir), f = (p: number) => (dir === 'CALL' ? p : 2.2 - p)
-    step(c, f(1.1005), 1000); step(c, f(1.10004), 850000)
+    step(c, f(1.1005), 700000); step(c, f(1.10004), 850000)
     expect(c.counterState).toBe('cancelled')
+  })
+  it('waits (does not buy early) when price returns before the last 5 minutes, then buys inside the window', () => {
+    const c = mk(dir), f = (p: number) => (dir === 'CALL' ? p : 2.2 - p)
+    step(c, f(1.1005), 100000); step(c, f(1.10004), 200000)
+    expect(c.counterState).toBe('armed'); step(c, f(1.10004), 700000)
+    expect(c.counterState).toBe('open')
   })
 })

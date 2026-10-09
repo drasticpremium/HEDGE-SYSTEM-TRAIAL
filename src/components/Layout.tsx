@@ -4,18 +4,18 @@ import { Logo } from './Logo'
 import { Icon } from './Icon'
 import { PAIRS } from '../engine/pairs'
 import { useAppStore, type ThemeName } from '../store/useAppStore'
-import { useTrader } from '../store/trader'
+import { useServer } from '../store/server'
 import { NotifyWatcher, Toasts } from './NotifyWatcher'
 
 const navItems = [
-  ['/', 'Overview', 'home'], ['/desk', 'Live Desk', 'desk'], ['/auto', 'Auto', 'auto'], ['/server', '24/7 Server', 'server'], ['/alerts', 'Alerts', 'bell'], ['/charts', 'Charts', 'charts'], ['/log', 'Log', 'log'],
+  ['/', 'Overview', 'home'], ['/desk', 'Live Desk', 'desk'], ['/server', 'Auto Trader', 'server'], ['/copy', 'Copy Trades', 'copy'], ['/alerts', 'Alerts', 'bell'], ['/charts', 'Charts', 'charts'], ['/log', 'Log', 'log'],
   ['/performance', 'Performance', 'performance'], ['/accuracy', 'Accuracy', 'accuracy'], ['/settings', 'Settings', 'settings'], ['/about', 'About', 'about'],
 ] as const
 const THEMES: ThemeName[] = ['midnight', 'emerald', 'amber', 'violet', 'light', 'contrast']
 const DISCLAIMER = 'Educational tool, paper trading only, not financial advice. Binary options and leveraged forex carry a high risk of loss.'
 
 export function Layout() {
-  const loc = useLocation(), s = useAppStore(), running = useTrader((t) => t.running), cycle = useTrader((t) => t.cycle)
+  const loc = useLocation(), s = useAppStore(), srv = useServer((x) => x.data), running = !!srv?.enabled, cycle = srv?.cycle ?? null
   return (
     <div className="app-shell">
       <NotifyWatcher /><Toasts />
@@ -27,7 +27,7 @@ export function Layout() {
       <div className="content-panel">
         <header className="toolbar">
           <div className="mobile-only"><Logo /></div>
-          <span className={`chip ${running ? 'chip-ok' : 'chip-warn'}`}><i className={running ? 'pulse' : ''} />{running ? (cycle ? `In trade: ${cycle.pair} ${cycle.dir}` : 'Auto trader scanning') : 'Auto trader paused'}</span>
+          <span className={`chip ${running ? 'chip-ok' : 'chip-warn'}`}><i className={running ? 'pulse' : ''} />{running ? (cycle ? `In trade: ${cycle.pair} ${cycle.dir}` : 'Auto trader watching') : 'Auto trader paused'}</span>
           <div className="toolbar-ctl">
             <select aria-label="Pair" value={s.pair} onChange={(e) => s.setPair(e.target.value)}>{PAIRS.map((p) => <option key={p}>{p}</option>)}</select>
             <button type="button" className="ghost" onClick={() => s.setCurrencyUnit(s.currencyUnit === 'GH₵' ? 'USD' : 'GH₵')} title="Switch currency">{s.currencyUnit}</button>

@@ -1,19 +1,20 @@
 import { useMemo, useState } from 'react'
 import { formatMoney, useAppStore } from '../store/useAppStore'
 import { useCycles } from '../db/useCycles'
+import { useServer } from '../store/server'
 import { breakEven, cumulative, group, maxDrawdown, unhedgedPnl, wilson, currentStreak } from '../engine/stats'
 import { EquityChart } from '../components/EquityChart'
 
 const last = (x: number[]) => (x.length ? x[x.length - 1] : 0)
 const RANGES = { today: 86400000, '7d': 7 * 86400000, '30d': 30 * 86400000, all: Infinity } as const
 export function PerformancePage() {
-  const a = useAppStore(), all = useCycles()
-  const [range, setRange] = useState<keyof typeof RANGES>('all'), [src, setSrc] = useState<'both' | 'sim' | 'live'>('both')
+  const a = useAppStore(), all = useCycles(), srv = useServer((x) => x.data)
+  const [range, setRange] = useState<keyof typeof RANGES>('all'), src = 'both' as 'both' | 'sim' | 'live'
   const rows = useMemo(() => (all ?? []).filter((r) => Date.now() - new Date(r.time).getTime() <= RANGES[range] && (src === 'both' || r.source === src)), [all, range, src])
   const m = (v: number) => formatMoney(v, a.currencyUnit, a.ghcPerUsd)
   const net = rows.map((r) => r.netPnl), cum = cumulative(net), unh = cumulative(rows.map((r) => unhedgedPnl(r)))
-  const bin = cumulative(rows.map((r) => (r.binaryResult === 'WIN' ? r.stake * 0.95 : -r.stake) + (r.counterResult ? (r.counterResult === 'WIN' ? r.stake * 0.95 : -r.stake) : 0)))
-  const exn = cumulative(rows.map((r) => r.exnessResult - r.costs))
+  const bin = cumulative(rows.map((r) => (r.binaryPnl ?? 0) + (r.counterPnl ?? 0)))
+  const exn = cumulative(rows.map((r) => r.exnessPnl ?? r.exnessResult - r.costs))
   const wins = rows.filter((r) => r.binaryResult === 'WIN').length, ci = wilson(wins, rows.length)
   const gw = net.filter((x) => x > 0), gl = net.filter((x) => x < 0)
   const pf = gl.length ? gw.reduce((x, y) => x + y, 0) / Math.abs(gl.reduce((x, y) => x + y, 0)) : null
@@ -25,16 +26,14 @@ export function PerformancePage() {
       <section className="panel card wide">
         <h2>Performance</h2>
         <div className="seg">{(Object.keys(RANGES) as (keyof typeof RANGES)[]).map((r) => <button key={r} type="button" className={range === r ? 'on' : ''} onClick={() => setRange(r)}>{r}</button>)}</div>
-        <div className="seg">{(['both', 'sim', 'live'] as const).map((r) => <button key={r} type="button" className={src === r ? 'on' : ''} onClick={() => setSrc(r)}>{r}</button>)}</div>
-        <p className={live >= 300 ? 'ok-note' : 'warn-note'}>{live >= 300 ? 'Enough live cycles logged to judge the edge.' : `Edge not proven yet: ${live}/300 live cycles logged. Simulated cycles never count, a random walk has no edge.`}</p>
-        {src !== 'live' && <p className="warn-note">SIMULATED DATA: results only test the machinery.</p>}
+        <p className={live >= 300 ? 'ok-note' : 'warn-note'}>{live >= 300 ? 'Enough live cycles logged to judge the edge.' : `Edge not proven yet: ${live}/300 live cycles logged. Every cycle is paper money on the real market.`}</p>
       </section>
       <section className="panel card wide kpis">
-        {kpi('Total P&L', m(last(cum)), (last(cum)) >= 0 ? 'up' : 'down')}{kpi('Return on both accounts', pct((last(cum)) / ((a.binaryBalanceUsd + a.exnessBalanceUsd) || 1)))}
+        {kpi('Total P&L', m(last(cum)), (last(cum)) >= 0 ? 'up' : 'down')}{kpi('Return on both accounts', pct((last(cum)) / ((srv ? srv.capital.binary + srv.capital.exness : 0) || 1)))}
         {kpi('Cycles', String(rows.length))}{kpi('Binary win rate', rows.length ? pct(wins / rows.length) : 'no data')}
         {kpi('95% interval', ci ? `${pct(ci[0])} to ${pct(ci[1])}` : 'no data')}{kpi('Expectancy / cycle', rows.length ? m((last(cum)) / rows.length) : 'no data')}
         {kpi('Max drawdown', m(maxDrawdown(cum)))}{kpi('Profit factor', pf ? pf.toFixed(2) : 'no data')}{kpi('Streak', String(currentStreak(rows)))}
-        {kpi('Break-even (binary only)', pct(breakEven(0.95)))}{kpi('Costs paid', m(rows.reduce((x, r) => x + r.costs, 0)))}
+        {kpi('Break-even (binary only, ~93% payout)', pct(breakEven(0.93)))}{kpi('Costs paid', m(rows.reduce((x, r) => x + r.costs, 0)))}
       </section>
       <section className="panel card wide"><h2>Hedged vs unhedged (same signals)</h2><EquityChart series={[{ name: 'Hedged (full system)', color: 'var(--ac)', values: cum }, { name: 'Binary only', color: 'var(--warn)', values: unh }]} /></section>
       <section className="panel card"><h2>Binary account</h2><EquityChart height={140} series={[{ name: 'Binary P&L', color: 'var(--ok)', values: bin }]} /></section>

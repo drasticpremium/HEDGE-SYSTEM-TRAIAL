@@ -17,7 +17,7 @@ export function ServerPage() {
   return (
     <div className="page-grid">
       <section className="panel card wide">
-        <div className="row-between"><h2>24/7 Server paper trader (LIVE market data)</h2><span className={`chip ${data.enabled && !/error|Missing|failed/i.test(data.status) ? 'chip-ok' : 'chip-warn'}`}><i className="pulse" />{data.enabled ? 'Enabled' : 'Paused'}</span></div>
+        <div className="row-between"><h2>Auto Trader (24/7, real market data, paper money)</h2><span className={`chip ${data.enabled && !/error|Missing|failed/i.test(data.status) ? 'chip-ok' : 'chip-warn'}`}><i className="pulse" />{data.enabled ? 'Enabled' : 'Paused'}</span></div>
         <p>{data.status}</p><p className="mut">Runs on Cloudflare every minute with your laptop off. Last check {ageMin} min ago. API credits today {data.credits.n}/800 (free plan). Paper money only, never real orders. Edge is not proven until 300 cycles.</p>
       </section>
       <section className="panel card wide kpis">
@@ -35,7 +35,7 @@ export function ServerPage() {
         {msg && <p>{msg}</p>}</section>
       <section className="panel card wide"><h2>Closed cycles</h2>
         {!data.cycles.length ? <p className="empty">No closed cycles yet. The server trades only inside 08:00-17:00 GMT, Mon-Fri.</p> :
-          <table className="log-table"><thead><tr><th>Time (GMT)</th><th>Pair</th><th>Dir</th><th>Strength</th><th>Net</th><th>Outcome</th></tr></thead><tbody>{data.cycles.slice(0, 30).map((r) => <tr key={r.id}><td>{r.time.slice(0, 19).replace('T', ' ')}</td><td>{r.pair}</td><td>{r.direction}</td><td>{r.strength}</td><td className={r.netPnl >= 0 ? 'up' : 'down'}>{m(r.netPnl)}</td><td>{r.outcomeTag}</td></tr>)}</tbody></table>}</section>
+          <table className="log-table"><thead><tr><th>Time (GMT)</th><th>Pair</th><th>Dir</th><th>Quotex</th><th>Exness</th><th>Net</th><th>Outcome</th></tr></thead><tbody>{data.cycles.slice(0, 30).map((r) => <tr key={r.id}><td>{r.time.slice(0, 19).replace('T', ' ')}</td><td>{r.pair}</td><td>{r.direction}</td><td className={(r.binaryPnl ?? 0) + (r.counterPnl ?? 0) >= 0 ? 'up' : 'down'}>{m((r.binaryPnl ?? 0) + (r.counterPnl ?? 0))}</td><td className={(r.exnessPnl ?? 0) >= 0 ? 'up' : 'down'}>{m(r.exnessPnl ?? 0)}</td><td className={r.netPnl >= 0 ? 'up' : 'down'}>{m(r.netPnl)}</td><td>{r.outcomeTag}</td></tr>)}</tbody></table>}</section>
       <section className="wide"><h2>Server signals</h2><SignalCards rows={data.signals} /></section>
     </div>
   )

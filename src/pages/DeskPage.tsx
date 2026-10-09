@@ -1,70 +1,59 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { pipSize, pipValuePerLot } from '../engine/pairs'
-import { ensurePair, evaluate, useTrader } from '../store/trader'
-import { SignalHistory } from '../components/SignalHistory'
-import { TradeChart } from '../components/TradeChart'
+import { useEffect, useState } from 'react'
 import { useServer } from '../store/server'
-import type { Candle } from '../engine/math'
+import { TradeChart } from '../components/TradeChart'
+import { SignalCards } from '../components/SignalHistory'
 import { Pill } from '../components/Pill'
-import { useAppStore } from '../store/useAppStore'
+import { AdminToken } from '../components/AdminToken'
+import { winProbability } from '../engine/math'
+import { pipSize, pipValuePerLot } from '../engine/pairs'
+import { isTradingSession } from '../engine/serverCore'
 
-interface Ticket { ct: number; dir: 'CALL' | 'PUT'; entry: number; t: number; strength: number; stake: number; lots: number; stopPips: number; tpPips: number; missed: boolean }
-const beep = () => { try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 880; o.start(); o.stop(c.currentTime + 0.25) } catch { /* sound blocked */ } }
 const hms = (t: number) => new Date(t).toISOString().slice(11, 19)
-
+const cd = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` }
 export function DeskPage() {
-  const app = useAppStore(), pair = app.pair, tr = useTrader()
-  const news = tr.news, setNews = (v: boolean) => tr.set({ news: v }), [ticket, setTicket] = useState<Ticket | null>(null), [now, setNow] = useState(Date.now()), [copied, setCopied] = useState('')
-  useEffect(() => ensurePair(pair), [pair])
+  const d = useServer((s) => s.data), error = useServer((s) => s.error), control = useServer((s) => s.control), [now, setNow] = useState(Date.now()), [copied, setCopied] = useState(''), [msg, setMsg] = useState('')
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(i) }, [])
-  const srv = useServer((x) => x.data), [mode, setMode] = useState<'sim' | 'live'>('sim')
-  const liveC: Candle[] | undefined = srv?.candles?.[pair], useLive = mode === 'live' && !!liveC?.length, win = useLive ? 120 : 20
-  const m1: Candle[] = useLive ? liveC! : tr.candles[pair] ?? [], price = useLive ? liveC![liveC!.length - 1].c : tr.prices[pair], pip = pipSize(pair), pv = pipValuePerLot(pair)
-  const calc = useMemo(() => (price ? (useLive ? evaluate(pair, Date.now(), { m1, price }) : evaluate(pair, tr.simT)) : null), [price, m1.length, pair, tr.simT, useLive, tr.news, tr.respectSession])
-  const ready = !!calc && calc.ready
-  const tRef = useRef(ticket); tRef.current = ticket
-  useEffect(() => {
-    if (!calc || !price) return
-    const tk = tRef.current
-    if (!tk && ready) { setTicket({ ct: m1[m1.length - 1].t, dir: calc.sig.direction, entry: price, t: Date.now(), strength: calc.sig.strength, stake: calc.stake, lots: calc.sz.lots, stopPips: calc.sz.stopPips, tpPips: calc.sz.tpPips, missed: false }); beep(); document.title = 'SIGNAL READY - Hedge Signal Desk' }
-    else if (tk && !tk.missed && (Date.now() - tk.t > win * 1000 || Math.abs(price - tk.entry) / pip > 0.5)) setTicket({ ...tk, missed: true })
-    else if (tk && tk.missed && !ready) { setTicket(null); document.title = 'Hedge Signal Desk' }
-  }, [price, ready])
-  const dp = pair.endsWith('JPY') ? 3 : 5, f = (x: number) => x.toFixed(dp)
-  const check = (ok: boolean, label: string) => <li className={ok ? 'ok' : 'no'}>{ok ? '✔' : '✖'} {label}</li>
-  const copy = (k: string, text: string) => { void navigator.clipboard?.writeText(text); setCopied(k); setTimeout(() => setCopied(''), 1500) }
-  const tk = ticket, left = tk ? Math.max(0, win - (now - tk.t) / 1000) : 0
-  const exSide = tk?.dir === 'CALL' ? 'SELL' : 'BUY', sg = tk?.dir === 'CALL' ? 1 : -1
-  const expiry = tk ? hms(tk.t + 15 * 60000) : ''
-  const quoteUsd = pv / 100000 / pip
-  const margin = tk && price ? (tk.lots * 100000 * (pair.startsWith('USD') ? 1 : price * quoteUsd)) / app.leverage : 0
+  if (!d) return <div className="page-grid"><section className="panel card wide"><h2>Live Desk</h2><p className="empty">{error || 'Connecting to the server...'}</p></section></div>
+  const pair = d.signals[0]?.pair ?? Object.keys(d.candles)[0] ?? 'EURUSD', m1 = d.candles[pair] ?? [], price = d.prices[pair] ?? m1[m1.length - 1]?.c, pip = pipSize(pair), pv = pipValuePerLot(pair), dp = pair.endsWith('JPY') ? 3 : 5, f = (x: number) => x.toFixed(dp)
+  const last = d.signals[0], t = d.signals.find((s) => s.kind === 'TRADE' && s.pair === pair && Date.parse(s.expiry!) > now) ?? null
+  const sg = t?.dir === 'CALL' ? 1 : -1, fav = t && price ? ((price - t.price) / pip) * sg : 0, left = t ? (Date.parse(t.expiry!) - now) / 60000 : 0, c = d.cycle && d.cycle.pair === pair ? d.cycle : null
+  const hedgePips = c ? (c.tpHit ? c.tpPips : c.stopHit ? -c.stopPips : -fav) : -fav, exUsd = t ? hedgePips * t.lots! * pv : 0, qUsd = t ? (fav > 0 ? 0.93 : -1) * t.stake! : 0
+  const next = Math.ceil((now + 1) / 900000) * 900000, inWindow = isTradingSession(next), sessionOpen = isTradingSession(now)
+  const exSide = t?.hedgeSide, copy = (k: string, text: string) => { void navigator.clipboard?.writeText(text); setCopied(k); setTimeout(() => setCopied(''), 1500) }
+  const state = t ? 'READY' : last?.kind === 'NO_TRADE' ? 'NO TRADE' : 'WAIT'
   return (
     <div className="page-grid">
-      <section className="panel card wide row-between"><div className="seg"><button type="button" className={mode === 'sim' ? 'on' : ''} onClick={() => setMode('sim')}>Simulated feed</button><button type="button" className={mode === 'live' ? 'on' : ''} onClick={() => setMode('live')}>Live market (server)</button></div><span className={mode === 'live' && !useLive ? 'down' : 'mut'}>{mode === 'sim' ? 'Prices are SIMULATED. Do not trade real money from them.' : useLive ? `LIVE 1-minute candles via the 24/7 server. Last update ${Math.round((Date.now() - (srv?.lastTick ?? 0)) / 60000)} min ago. ${srv?.status}` : 'No live data yet. Check the 24/7 Server page.'}</span></section>
-      <section className="panel card"><h2>{pair} signal</h2>
-        <div className={`state ${ready ? 'ready' : calc ? 'wait' : 'none'}`}>{!calc ? 'LOADING' : ready ? 'READY' : calc.session && !news ? 'WAIT' : 'NO TRADE'}</div>
+      <section className="panel card"><h2>{pair} decision</h2>
+        <div className={`state ${t ? 'ready' : 'none'}`} style={!t && last ? { background: 'var(--bad)', color: '#2a0608' } : undefined}>{state}</div>
         <p className="big">{price ? f(price) : '...'}</p>
-        <p>Strength {calc?.sig.strength ?? 0}/100, direction {calc?.sig.direction ?? '-'}. Volatility {calc?.vol.toFixed(1) ?? '-'} pips per 15 min.</p>
-        <label className="watch-item"><input type="checkbox" checked={news} onChange={(e) => setNews(e.target.checked)} /> News nearby (blocks signals)</label></section>
-      <section className="panel card"><h2>Conditions</h2><ul className="checks">
-        {check(!!calc?.session, 'Session open 08:00-17:00 GMT (sim clock)')}{check(!news, 'No news nearby')}{check((calc?.spread ?? 9) <= 1.4, 'Spread normal')}
-        {check((calc?.vol ?? 0) >= 1.5 && (calc?.vol ?? 99) <= 8, 'Volatility in normal range')}{check((calc?.sig.strength ?? 0) >= 60, 'Strength at least 60')}{check(app.binaryBalanceUsd >= app.minimumBinaryStake, 'Balance covers minimum stake')}</ul></section>
+        <p>Live real-market price (1-minute candles). Next decision in <strong>{inWindow ? cd(next - now) : 'next session'}</strong>{inWindow ? ` at ${hms(next).slice(0, 5)} GMT` : ''}.</p>
+        <p className="mut">Decisions happen at the open of every 15-minute candle, 08:00 to 16:45 GMT, Mon to Fri. Session now: {sessionOpen ? 'OPEN' : 'CLOSED'}.</p>
+        <div className="button-row"><AdminToken /><button type="button" className="btn" onClick={async () => setMsg((await control({ news: !d.news })) || 'Done')}>News nearby: {d.news ? 'ON (blocks)' : 'off'}</button></div>{msg && <p>{msg}</p>}</section>
+      <section className="panel card"><h2>{t ? 'Why this signal' : 'Why no trade'}</h2>
+        {t ? <ul className="checks"><li className="ok">✔ Strength {t.strength}/100</li><li className="ok">✔ H1 trend, M15 slope, RSI and volatility agree</li><li className="ok">✔ Session open, no news switch, balance and margin fine</li></ul>
+          : last?.kind === 'NO_TRADE' ? <ul className="checks">{last.reasons.map((r) => <li key={r} className="no">✖ {r}</li>)}</ul> : <p className="empty">Waiting for the first decision.</p>}</section>
       <section className="panel card block quotex"><h2>Quotex (binary)</h2>
-        {!tk ? <p className="empty">Waiting for a READY signal. You will get a sound and a ticket here.</p> : <>
-          <p className="big"><Pill side={tk.dir === 'CALL' ? 'BUY' : 'SELL'} /> <small className="mut">{tk.dir}</small> {pair.slice(0, 3)}/{pair.slice(3)}</p>
-          <p>Stake <strong>${tk.stake.toFixed(2)}</strong>, expiry <strong>{expiry} GMT</strong> (15 min)</p><p>Entry about {f(tk.entry)}</p>
-          <p>Counter plan: if the Exness stop hits, wait for price at {f(tk.entry + sg * 0.5 * pip)} (entry +0.5 pip, never below entry), then buy a {tk.dir === 'CALL' ? 'PUT' : 'CALL'} for $${tk.stake.toFixed(2)} with the same expiry, at least 1 minute left. One counter at most.</p>
-          <button type="button" className="btn" onClick={() => copy('q', `Quotex: ${tk.dir} ${pair} $${tk.stake.toFixed(2)} expiry ${expiry} GMT entry ${f(tk.entry)}`)}>{copied === 'q' ? 'Copied' : 'Copy Quotex ticket'}</button></>}</section>
+        {!t ? <p className="empty">No active signal. A ticket appears here at the open of a 15-minute candle when conditions are right.</p> : <>
+          <p className="big"><Pill side={t.dir === 'CALL' ? 'BUY' : 'SELL'} /> <small className="mut">{t.dir}</small></p>
+          <p>Stake <strong>${t.stake!.toFixed(2)}</strong>, expiry <strong>{hms(Date.parse(t.expiry!))} GMT</strong> ({cd(left * 60000)} left)</p><p>Entry about {f(t.price)}, now {price ? f(price) : '-'} ({fav >= 0 ? '+' : ''}{fav.toFixed(1)} pips for the binary)</p>
+          <p>Counter plan: if the Exness stop hits and price returns to {f(t.price + sg * 0.5 * pip)} in the last 5 minutes, buy the opposite binary, same expiry.</p>
+          <button type="button" className="btn" onClick={() => copy('q', `Quotex: ${t.dir === 'CALL' ? 'BUY/CALL' : 'SELL/PUT'} ${pair} $${t.stake!.toFixed(2)} expiry ${hms(Date.parse(t.expiry!))} GMT entry ${f(t.price)}`)}>{copied === 'q' ? 'Copied' : 'Copy Quotex ticket'}</button></>}</section>
       <section className="panel card block exness"><h2>Exness (hedge)</h2>
-        {!tk ? <p className="empty">The hedge ticket appears together with the binary.</p> : <>
-          <p className="big"><Pill side={exSide as 'BUY' | 'SELL'} /> {tk.lots.toFixed(2)} lots</p>
-          <p>Entry at market about {f(tk.entry)}</p><p>Stop loss <strong>{f(tk.entry + sg * tk.stopPips * pip)}</strong> ({tk.stopPips} pips)</p><p>Take profit <strong>{f(tk.entry - sg * tk.tpPips * pip)}</strong> ({tk.tpPips} pips)</p>
-          <p>Close any open hedge at binary expiry {expiry} GMT. Approx margin ${margin.toFixed(2)} at 1:{app.leverage}.</p>
-          <button type="button" className="btn" onClick={() => copy('e', `Exness: ${exSide} ${pair} ${tk.lots.toFixed(2)} lots SL ${f(tk.entry + sg * tk.stopPips * pip)} TP ${f(tk.entry - sg * tk.tpPips * pip)}`)}>{copied === 'e' ? 'Copied' : 'Copy Exness ticket'}</button></>}</section>
-      {tk && <section className="panel card wide"><h2>Ticket status</h2>{tk.missed ? <p className="down"><strong>MISSED.</strong> Price moved over 0.5 pip or the time window passed. Wait for the next signal.</p> : <><p>Take both trades within <strong>{left.toFixed(0)} s</strong>.</p><div className="bar"><i style={{ width: `${(left / win) * 100}%` }} /></div></>}
-        <p className="mut">Real trades are placed by you on Quotex and Exness. This site never places orders. Prices here are simulated, so use the live feed (coming) before trading real money.</p></section>}
-      <section className="panel card wide"><h2>{pair} trade chart {useLive ? '(live)' : '(simulated)'}</h2><TradeChart candles={m1} digits={dp} box={tk && !tk.missed ? { t0: tk.ct, t1: tk.ct + 15 * 60000, entry: tk.entry, sl: tk.entry + sg * tk.stopPips * pip, tp: tk.entry - sg * tk.tpPips * pip, slPips: tk.stopPips, tpPips: tk.tpPips, quotex: tk.dir === 'CALL' ? 'BUY' : 'SELL' } : null} levels={tk && !tk.missed ? [{ price: tk.entry, label: 'Entry', color: '#5ea0ff' }, { price: tk.entry + sg * tk.stopPips * pip, label: 'Exness stop', color: '#ff6d7a' }, { price: tk.entry - sg * tk.tpPips * pip, label: 'Exness TP', color: '#2ecc8f' }, { price: tk.entry + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : []} /></section>
-      <SignalHistory pair={pair} />
+        {!t ? <p className="empty">The hedge ticket appears together with the binary.</p> : <>
+          <p className="big"><Pill side={exSide!} /> {t.lots!.toFixed(2)} lots</p><p>Entry at market about {f(t.price)}</p>
+          <p>Stop loss <strong>{f(t.sl!)}</strong> ({t.stopPips} pips, -${t.stopUsd?.toFixed(2)})</p><p>Take profit <strong>{f(t.tp!)}</strong> ({t.tpPips} pips, +${t.tpUsd?.toFixed(2)})</p>
+          <p>Close any open hedge at expiry {hms(Date.parse(t.expiry!))} GMT.{t.scaled !== undefined && t.scaled < 1 ? ` Hedge scaled to ${(t.scaled * 100).toFixed(0)}% of plan to fit the Exness balance.` : ''}</p>
+          <button type="button" className="btn" onClick={() => copy('e', `Exness: ${exSide} ${pair} ${t.lots!.toFixed(2)} lots SL ${f(t.sl!)} TP ${f(t.tp!)}`)}>{copied === 'e' ? 'Copied' : 'Copy Exness ticket'}</button></>}</section>
+      {t && <section className="panel card wide"><h2>Going in my favour (model estimate)</h2>
+        <div className="kpis"><div className="kpi"><span>Chance the binary finishes in the money</span><strong>{(winProbability(fav, Math.max(1, t.vol), left) * 100).toFixed(0)}%</strong></div>
+          <div className="kpi"><span>Quotex now (estimate)</span><strong className={qUsd >= 0 ? 'up' : 'down'}>{qUsd >= 0 ? '+' : '-'}${Math.abs(qUsd).toFixed(2)}</strong></div>
+          <div className="kpi"><span>Exness now</span><strong className={exUsd >= 0 ? 'up' : 'down'}>{exUsd >= 0 ? '+' : '-'}${Math.abs(exUsd).toFixed(2)}</strong></div>
+          <div className="kpi"><span>Combined (estimate)</span><strong className={qUsd + exUsd >= 0 ? 'up' : 'down'}>{qUsd + exUsd >= 0 ? '+' : '-'}${Math.abs(qUsd + exUsd).toFixed(2)}</strong></div></div>
+        <p className="mut">The percentage is a random-walk estimate, not a promise. Final results use the real price at expiry.</p></section>}
+      <section className="panel card wide"><h2>{pair} chart (real market, 1-minute)</h2>
+        <TradeChart candles={m1} digits={dp} levels={t ? [{ price: t.price, label: 'Entry', color: '#5ea0ff' }, { price: t.sl!, label: 'Exness stop', color: '#ff6d7a' }, { price: t.tp!, label: 'Exness TP', color: '#2ecc8f' }, { price: t.price + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : []}
+          box={t ? { t0: Date.parse(t.time), t1: Date.parse(t.expiry!), entry: t.price, sl: t.sl!, tp: t.tp!, slPips: t.stopPips!, tpPips: t.tpPips!, quotex: t.dir === 'CALL' ? 'BUY' : 'SELL' } : null} /></section>
+      <section className="wide"><h2>Signal history</h2><p className="mut">Newest first. Green = tradable candle, red = a run of no-trade candles (shown once).</p><SignalCards rows={d.signals} /></section>
     </div>
   )
 }

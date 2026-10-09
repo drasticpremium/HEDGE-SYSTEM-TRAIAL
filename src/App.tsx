@@ -1,10 +1,9 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
-import './store/trader'
 import { AboutPage } from './pages/AboutPage'
 import { AccuracyPage } from './pages/AccuracyPage'
-import { AutoPage } from './pages/AutoPage'
+import { CopyPage } from './pages/CopyPage'
 import { ChartsPage } from './pages/ChartsPage'
 import { DeskPage } from './pages/DeskPage'
 import { LogPage } from './pages/LogPage'
@@ -34,7 +33,8 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<OverviewPage />} />
           <Route path="/desk" element={<DeskPage />} />
-          <Route path="/auto" element={<AutoPage />} />
+          <Route path="/auto" element={<Navigate to="/server" replace />} />
+          <Route path="/copy" element={<CopyPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/server" element={<ServerPage />} />
           <Route path="/charts" element={<ChartsPage />} />

@@ -1,4 +1,5 @@
 import { useAppStore } from '../store/useAppStore'
+import { ServerSettings } from '../components/ServerSettings'
 
 export function SettingsPage() {
   const theme = useAppStore((state) => state.theme)
@@ -47,6 +48,7 @@ export function SettingsPage() {
         </div>
         <button onClick={resetAccounts}>Reset accounts</button>
       </section>
+      <ServerSettings />
     </div>
   )
 }

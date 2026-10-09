@@ -15,7 +15,7 @@ export function currentStreak(rows: CycleLogRow[]): number {
   return n
 }
 /** Binary-only P&L of the same signal (what you'd get with no hedge and no counter). */
-export const unhedgedPnl = (r: CycleLogRow, payout = 0.95) => (r.binaryResult === 'WIN' ? r.stake * payout : -r.stake)
+export const unhedgedPnl = (r: CycleLogRow, payout = 0.93) => r.binaryPnl ?? (r.binaryResult === 'WIN' ? r.stake * payout : -r.stake)
 export function group(rows: CycleLogRow[], key: (r: CycleLogRow) => string) {
   const m = new Map<string, { n: number; wins: number; net: number }>()
   for (const r of rows) { const k = key(r), g = m.get(k) ?? { n: 0, wins: 0, net: 0 }; g.n++; g.net += r.netPnl; if (r.binaryResult === 'WIN') g.wins++; m.set(k, g) }

@@ -514,3 +514,11 @@ select, .ghost { background: var(--card); color: var(--tx); border: 1px solid va
 .toast { background: var(--card); border: 1px solid var(--bd); border-left: 5px solid var(--ac); border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35); cursor: pointer; animation: fadein .25s ease; } .toast p { margin: 4px 0 0; color: var(--mut); white-space: pre-line; }
 .toast-ok { border-left-color: var(--ok); } .toast-bad { border-left-color: var(--bad); }
 .steps { padding-left: 20px; display: grid; gap: 6px; } code { background: var(--card-soft); padding: 1px 6px; border-radius: 4px; }
+
+/* ---- v6: log, copy trades, settings ---- */
+.table-scroll { overflow-x: auto; } .log-table th, .log-table td { white-space: nowrap; padding: 6px 10px; text-align: left; }
+.group-row th { text-align: center; font-size: 12px; letter-spacing: .6px; } .g-quotex { border-bottom: 3px solid #2f7bff; } .g-exness { border-bottom: 3px solid var(--warn); }
+.log-table tfoot td { border-top: 1px solid var(--bd); padding-top: 10px; }
+.paste { width: 100%; box-sizing: border-box; background: var(--card-soft); color: var(--tx); border: 1px solid var(--bd); border-radius: 10px; padding: 10px; font: inherit; margin-bottom: 10px; }
+.field-row.wrap { display: flex; flex-wrap: wrap; gap: 12px; } .field-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--mut); }
+input, textarea { background: var(--card); color: var(--tx); border: 1px solid var(--bd); border-radius: 8px; padding: 7px 10px; font: inherit; }
