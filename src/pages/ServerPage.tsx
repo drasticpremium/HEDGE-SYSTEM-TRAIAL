@@ -18,7 +18,7 @@ export function ServerPage() {
     <div className="page-grid">
       <section className="panel card wide">
         <div className="row-between"><h2>Auto Trader (24/7, real market data, paper money)</h2><span className={`chip ${data.enabled && !/error|Missing|failed/i.test(data.status) ? 'chip-ok' : 'chip-warn'}`}><i className="pulse" />{data.enabled ? 'Enabled' : 'Paused'}</span></div>
-        <p>{data.status}</p><p className="mut">Runs on Cloudflare every minute with your laptop off. Last check {ageMin} min ago. API credits today {data.credits.n}/800 (free plan). Paper money only, never real orders. Edge is not proven until 300 cycles.</p>
+        <p>{data.status}</p><p>Recovery ladder: <strong>{!data.settings.recoveryOn ? 'off' : (data.ladder ?? 0) === 0 ? 'idle (next trade is a normal signal)' : (data.ladder ?? 0) === 1 ? '🔁 recovery 1 queued: next candle is traded regardless, same direction as the first trade' : '🔁 recovery 2 queued: next candle is traded regardless, same direction, with DOUBLE stake and lots'}</strong></p><p className="mut">Runs on Cloudflare every minute with your laptop off. Last check {ageMin} min ago. API credits today {data.credits.n}/800 (free plan). Paper money only, never real orders. Edge is not proven until 300 cycles.</p>
       </section>
       <section className="panel card wide kpis">
         {kpi('Binary account', m(data.binary))}{kpi('Exness account', m(data.exness))}{kpi('Combined', m(data.binary + data.exness))}

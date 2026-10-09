@@ -27,6 +27,7 @@ export function DeskPage() {
         <div className={`state ${t ? 'ready' : 'none'}`} style={!t && last ? { background: 'var(--bad)', color: '#2a0608' } : undefined}>{state}</div>
         <p className="big">{price ? f(price) : '...'}</p>
         <p>Live real-market price (1-minute candles). Next decision in <strong>{inWindow ? cd(next - now) : 'next session'}</strong>{inWindow ? ` at ${hms(next).slice(0, 5)} GMT` : ''}.</p>
+        {(d.ladder ?? 0) > 0 && d.settings.recoveryOn && <p className="down"><strong>🔁 Recovery {d.ladder} queued: the next candle will be traded regardless of the signal, in the same direction as the first trade{d.ladder === 2 ? ", with double stake and lots" : ""}.</strong></p>}
         <p className="mut">Decisions happen at the open of every 15-minute candle, 08:00 to 16:45 GMT, Mon to Fri. Session now: {sessionOpen ? 'OPEN' : 'CLOSED'}.</p>
         <div className="button-row"><AdminToken /><button type="button" className="btn" onClick={async () => setMsg((await control({ news: !d.news })) || 'Done')}>News nearby: {d.news ? 'ON (blocks)' : 'off'}</button></div>{msg && <p>{msg}</p>}</section>
       <section className="panel card"><h2>{t ? 'Why this signal' : 'Why no trade'}</h2>
