@@ -3,10 +3,10 @@ import type { Candle } from '../engine/math'
 import type { CycleLogRow, SignalRow } from '../db/db'
 import type { Cycle } from '../engine/cycle'
 import type { Settings } from '../engine/serverCore'
-import type { CopyTrade } from '../engine/copyCore'
+import type { CopyTrade, Feed, FeedEvent } from '../engine/copyCore'
 export interface ServerView {
   telegram: boolean; now: number; enabled: boolean; news: boolean; status: string; lastTick: number; credits: { day: string; n: number }; binary: number; exness: number; capital: { binary: number; exness: number }; settings: Settings
-  cycle: Cycle | null; prices: Record<string, number>; cycles: CycleLogRow[]; signals: SignalRow[]; candles: Record<string, Candle[]>; copy: { balance: number; start: number; trades: CopyTrade[] }; testResult?: string
+  ladder?: number; cycle: Cycle | null; prices: Record<string, number>; cycles: CycleLogRow[]; signals: SignalRow[]; candles: Record<string, Candle[]>; copy: { balance: number; start: number; trades: CopyTrade[]; feeds: Feed[]; log: FeedEvent[] }; testResult?: string
 }
 interface S { data: ServerView | null; error: string; load: () => Promise<void>; control: (body: object, token?: string) => Promise<string> }
 export const useServer = create<S>((set) => ({

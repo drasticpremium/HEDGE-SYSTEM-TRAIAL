@@ -25,7 +25,7 @@ export function LogPage() {
           <tbody>{rows.map((r) => (
             <tr key={r.id}><td>{r.time.slice(0, 16).replace('T', ' ')}</td><td>{r.pair}</td><td><Pill side={r.direction === 'CALL' ? 'BUY' : 'SELL'} /></td><td>{r.strength}</td>
               <td>{m(r.stake)}</td><td>{r.payout ? `${(r.payout * 100).toFixed(1)}%` : '-'}</td><td className={r.binaryResult === 'WIN' ? 'up' : 'down'}>{r.binaryResult}</td><td>{r.counterResult ?? '-'}</td><td className={tone(q(r))}>{m(q(r))}</td>
-              <td>{r.lots.toFixed(2)}</td><td className={tone(r.exnessResult)}>{m(r.exnessResult)}</td><td>{m(-r.costs)}</td><td className={tone(e(r))}>{m(e(r))}</td><td className={tone(r.netPnl)}><strong>{m(r.netPnl)}</strong></td><td>{r.outcomeTag}</td></tr>
+              <td>{r.lots.toFixed(2)}</td><td className={tone(r.exnessResult)}>{m(r.exnessResult)}</td><td>{m(-r.costs)}</td><td className={tone(e(r))}>{m(e(r))}</td><td className={tone(r.netPnl)}><strong>{m(r.netPnl)}</strong></td><td>{r.outcomeTag}{r.rec ? ` (recovery ${r.rec})` : ''}</td></tr>
           ))}</tbody>
           <tfoot><tr><td colSpan={8}><strong>Totals ({rows.length} cycles)</strong></td><td className={tone(tq)}><strong>{m(tq)}</strong></td><td colSpan={3}></td><td className={tone(te)}><strong>{m(te)}</strong></td><td className={tone(tn)}><strong>{m(tn)}</strong></td><td></td></tr></tfoot>
         </table></div>)}

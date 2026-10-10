@@ -21,10 +21,9 @@ export function ServerSettings() {
       <p className="mut">Changes apply from the next decision. Stop and take profit are in money; the pips follow from the lot size.</p>
       <div className="field-row wrap">{FIELDS.map(([k, label, hint]) => <label key={k} title={hint}>{label}<input type="number" step="any" value={f[k] as number} onChange={(e) => setF({ ...f, [k]: Number(e.target.value) })} /></label>)}
         <label className="watch-item"><input type="checkbox" checked={f.autoLots} onChange={(e) => setF({ ...f, autoLots: e.target.checked })} /> Adjust lots to volatility (up to the max)</label>
-        <label className="watch-item"><input type="checkbox" checked={f.recoveryOn} onChange={(e) => setF({ ...f, recoveryOn: e.target.checked })} /> Recovery ladder: after a losing binary the next candle is traded regardless, same direction as the first trade (twice, third trade doubled)</label>
         <label className="watch-item"><input type="checkbox" checked={f.headsUp} onChange={(e) => setF({ ...f, headsUp: e.target.checked })} /> Heads-up messages before each open</label>
         <label className="watch-item"><input type="checkbox" checked={f.tgNoTrade} onChange={(e) => setF({ ...f, tgNoTrade: e.target.checked })} /> Telegram message for no-trade candles too</label></div>
-      <div className="button-row"><AdminToken /><button type="button" className="btn primary" onClick={() => void act({ action: 'settings', settings: f })}>Save settings</button></div>
+      <div className="button-row"><AdminToken /><button type="button" className="btn primary" onClick={() => void act({ action: 'settings', settings: (({ recoveryOn: _r, ...rest }) => rest)(f) })}>Save settings</button></div>
       <h2 style={{ marginTop: 18 }}>Capital and data</h2>
       <div className="field-row"><label>Quotex capital (GH₵)<input type="number" value={bg} onChange={(e) => setBg(+e.target.value)} /></label><label>Exness capital (GH₵)<input type="number" value={eg} onChange={(e) => setEg(+e.target.value)} /></label></div>
       <div className="button-row"><button type="button" className="btn" onClick={() => void act({ action: 'capital', binaryGhs: bg, exnessGhs: eg })}>Apply capital (keep history)</button>

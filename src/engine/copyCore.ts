@@ -3,19 +3,21 @@ import { USD_VALUE } from './pairs'
 /** Copy-trade paper ledger. Completely separate from the auto trader's accounts and history. */
 export interface CopyTrade {
   id: number; created: string; pair: string; side: 'BUY' | 'SELL'; type: 'MARKET' | 'LIMIT' | 'STOP'; entry: number; sl: number | null; tps: number[]
-  lots: number; remaining: number; status: 'PENDING' | 'OPEN' | 'CLOSED' | 'CANCELLED'; fillPrice?: number; filledAt?: string; closedAt?: string; realized: number; tpHit: number; exit?: string; raw?: string
+  src?: string; msgId?: number; lots: number; remaining: number; status: 'PENDING' | 'OPEN' | 'CLOSED' | 'CANCELLED'; fillPrice?: number; filledAt?: string; closedAt?: string; realized: number; tpHit: number; exit?: string; raw?: string
 }
-export interface CopyState { balance: number; start: number; trades: CopyTrade[]; lastT: Record<string, number> }
-export const newCopy = (start = 250 / 11): CopyState => ({ balance: start, start, trades: [], lastT: {} })
+export interface Feed { id: number; name: string; enabled: boolean; lastId: number; checked: number; found: number; copied: number; ignored: number; error: string }
+export interface FeedEvent { time: string; channel: string; msgId: number; status: 'copied' | 'ignored'; note: string; text: string }
+export interface CopyState { balance: number; start: number; trades: CopyTrade[]; lastT: Record<string, number>; feeds: Feed[]; log: FeedEvent[] }
+export const newCopy = (start = 250 / 11): CopyState => ({ balance: start, start, trades: [], lastT: {}, feeds: [], log: [] })
 /** Paper P&L in USD for a price move. Quote-currency conversion uses rough fixed rates, so treat results as estimates. */
 export const pnlUsd = (pair: string, diff: number, lots: number) => diff * (pair.startsWith('XAU') ? 100 : pair.startsWith('XAG') ? 5000 : 100000) * lots * (pair.startsWith('XAU') || pair.startsWith('XAG') ? 1 : USD_VALUE[pair.slice(3)] ?? 1)
-export interface CopyInput { pair: string; side: 'BUY' | 'SELL'; type: 'AUTO' | 'MARKET' | 'LIMIT' | 'STOP'; entry: number | null; sl: number | null; tps: number[]; lots: number; raw?: string }
+export interface CopyInput { pair: string; side: 'BUY' | 'SELL'; type: 'AUTO' | 'MARKET' | 'LIMIT' | 'STOP'; entry: number | null; sl: number | null; tps: number[]; lots: number; raw?: string; src?: string; msgId?: number }
 /** Create a trade. AUTO: within 0.03% of the live price = market fill, otherwise a pending limit or stop. */
 export function addCopy(c: CopyState, i: CopyInput, price: number, nowIso: string, id: number): CopyTrade {
   const entry = i.entry ?? price, near = Math.abs(entry - price) / price <= 0.0003
   let type: CopyTrade['type'] = i.type === 'AUTO' ? (i.entry === null || near ? 'MARKET' : (i.side === 'BUY') === (entry < price) ? 'LIMIT' : 'STOP') : i.type
   if (type === 'MARKET' && i.entry !== null && !near && i.type === 'AUTO') type = 'LIMIT'
-  const t: CopyTrade = { id, created: nowIso, pair: i.pair, side: i.side, type, entry: type === 'MARKET' ? price : entry, sl: i.sl, tps: [...i.tps], lots: i.lots, remaining: i.lots, status: 'PENDING', realized: 0, tpHit: 0, raw: i.raw }
+  const t: CopyTrade = { id, created: nowIso, pair: i.pair, side: i.side, type, entry: type === 'MARKET' ? price : entry, sl: i.sl, tps: [...i.tps], lots: i.lots, remaining: i.lots, status: 'PENDING', realized: 0, tpHit: 0, raw: i.raw, src: i.src, msgId: i.msgId }
   if (type === 'MARKET') { t.status = 'OPEN'; t.fillPrice = price; t.filledAt = nowIso }
   c.trades.unshift(t); if (c.trades.length > 200) c.trades.pop()
   return t

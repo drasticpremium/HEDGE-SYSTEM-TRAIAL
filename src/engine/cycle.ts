@@ -3,7 +3,7 @@ export type Dir = 'CALL' | 'PUT'
 export interface Cycle {
   id: number; pair: string; dir: Dir; entry: number; openT: number; expiryT: number
   stake: number; lots: number; pip: number; pipValue: number; stopPips: number; tpPips: number
-  strength: number; payout: number; costPerLot: number; cwMin?: number; cMinLeft?: number
+  strength: number; payout: number; costPerLot: number; cwMin?: number; cMinLeft?: number; rec?: number
   stopHit: boolean; tpHit: boolean; counterState: 'none' | 'armed' | 'open' | 'cancelled'; counterEntry: number | null
 }
 export interface Settled { binary: number; counter: number; exness: number; cost: number; net: number; tag: string; binaryWin: boolean; counterWin: boolean | null }

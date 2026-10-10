@@ -16,7 +16,7 @@ export interface CycleLogRow {
   netPnl: number
   outcomeTag: string
   source: 'sim' | 'live'
-  binaryPnl?: number; counterPnl?: number; exnessPnl?: number; payout?: number
+  binaryPnl?: number; counterPnl?: number; exnessPnl?: number; payout?: number; rec?: number
 }
 
 export interface EventLogRow {
@@ -29,7 +29,7 @@ export interface EventLogRow {
 
 export interface SignalRow {
   id?: number; time: string; pair: string; kind: 'TRADE' | 'NO_TRADE'; dir?: 'CALL' | 'PUT'; price: number; strength: number; vol: number
-  stake?: number; lots?: number; hedgeSide?: 'BUY' | 'SELL'; sl?: number; tp?: number; stopPips?: number; tpPips?: number; expiry?: string; stopUsd?: number; tpUsd?: number; scaled?: number; reasons: string[]; skipped: number
+  stake?: number; lots?: number; hedgeSide?: 'BUY' | 'SELL'; sl?: number; tp?: number; stopPips?: number; tpPips?: number; expiry?: string; stopUsd?: number; tpUsd?: number; scaled?: number; rec?: number; reasons: string[]; skipped: number
 }
 
 class HedgeSignalDeskDatabase extends Dexie {

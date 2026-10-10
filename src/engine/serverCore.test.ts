@@ -22,7 +22,7 @@ describe('15-minute auto engine on a random walk', () => {
   it('balances move by exactly the sum of net P&L', () => expect(s.binary + s.exness - (s.capital.binary + s.capital.exness)).toBeCloseTo(s.cycles.reduce((x, c) => x + c.netPnl, 0), 0))
   it('no two no-trade cards in a row', () => { for (let i = 1; i < s.signals.length; i++) expect(s.signals[i].kind === 'NO_TRADE' && s.signals[i - 1].kind === 'NO_TRADE').toBe(false) })
   it('stop and take profit are money-based (about $8 and $15 at full size)', () => { const big = run(25, 3000), t = big.signals.find((x) => x.kind === 'TRADE' && !x.rec)!; expect(t.lots).toBeLessThanOrEqual(0.2); if (t.scaled === 1) { expect(t.stopUsd!).toBeCloseTo(8, 0); expect(t.tpUsd!).toBeCloseTo(15, 0) } })
-  it('a tiny account scales the hedge down instead of failing', () => { const t = newState(); setCapital(t, 250, 250); t.settings.minStrength = 0; t.ladder = 1; t.h1.EURUSD = Array.from({ length: 80 }, (_, i) => ({ t: i * 3600000, o: 1.08 + i * 0.0003, h: 1.0803 + i * 0.0003, l: 1.0797 + i * 0.0003, c: 1.08 + i * 0.0003 })); t.m15.EURUSD = Array.from({ length: 60 }, (_, i) => ({ t: i * 900000, o: 1.1, h: 1.1002, l: 1.0998, c: 1.1 })); t.candles.EURUSD = t.m15.EURUSD; decide(t, 'EURUSD', 2e12, 1.115); const r = t.signals[0]; expect(r.kind).toBe('TRADE'); expect(r.lots!).toBeLessThan(0.2); expect(r.scaled!).toBeLessThan(1) })
+  it('a tiny account scales the hedge down instead of failing', () => { const t = newState(); setCapital(t, 250, 250); t.settings.minStrength = 0; t.settings.recoveryOn = true; t.ladder = 1; t.h1.EURUSD = Array.from({ length: 80 }, (_, i) => ({ t: i * 3600000, o: 1.08 + i * 0.0003, h: 1.0803 + i * 0.0003, l: 1.0797 + i * 0.0003, c: 1.08 + i * 0.0003 })); t.m15.EURUSD = Array.from({ length: 60 }, (_, i) => ({ t: i * 900000, o: 1.1, h: 1.1002, l: 1.0998, c: 1.1 })); t.candles.EURUSD = t.m15.EURUSD; decide(t, 'EURUSD', 2e12, 1.115); const r = t.signals[0]; expect(r.kind).toBe('TRADE'); expect(r.lots!).toBeLessThan(0.2); expect(r.scaled!).toBeLessThan(1) })
 })
 describe('admin helpers and messages', () => {
   it('setCapital and clearAuto', () => { const s: EngineState = newState(); setCapital(s, 1100, 550); expect(s.binary).toBeCloseTo(100, 6); expect(s.exness).toBeCloseTo(50, 6); s.binary = 80; s.cycles.push({} as never); clearAuto(s); expect(s.binary).toBeCloseTo(100, 6); expect(s.cycles.length).toBe(0) })
@@ -35,10 +35,11 @@ describe('admin helpers and messages', () => {
 const series = (n: number, f: (i: number) => number, step: number) => Array.from({ length: n }, (_, i) => { const c = f(i); return { t: 1.7e12 + i * step, o: c, h: c + 0.0002, l: c - 0.0002, c } })
 /** State with a clear uptrend, a rich account, and a minimum strength nobody can reach (so normal trades are blocked). */
 function ready(extra: Partial<EngineState['settings']> = {}) {
-  const s = newState(); setCapital(s, 50000, 50000); Object.assign(s.settings, { minStrength: 101, ...extra })
+  const s = newState(); setCapital(s, 50000, 50000); Object.assign(s.settings, { minStrength: 101, recoveryOn: true, ...extra })
   s.h1.EURUSD = series(80, (i) => 1.08 + i * 0.0003, 3600000); s.m15.EURUSD = series(60, (i) => 1.1 + i * 0.00004, 900000); s.candles.EURUSD = series(60, (i) => 1.1 + i * 0.00001, 60000); return s
 }
 describe('recovery ladder', () => {
+  it('is OFF by default and only runs when switched on', () => { expect(newState().settings.recoveryOn).toBe(false); const off = ready({ recoveryOn: false }); off.ladder = 1; decide(off, 'EURUSD', 2e12, 1.115); expect(off.cycle).toBeNull() })
   it('transitions: loss climbs 0>1>2, third loss halts, any win resets, off disables', () => { expect(nextLadder(0, true, true)).toBe(1); expect(nextLadder(1, true, true)).toBe(2); expect(nextLadder(2, true, true)).toBe(0); expect(nextLadder(1, false, true)).toBe(0); expect(nextLadder(0, true, false)).toBe(0) })
   it('a normal candle is blocked, a recovery candle is traded regardless of gates and the news switch', () => {
     const a = ready(); a.news = true; decide(a, 'EURUSD', 2e12, 1.115); expect(a.cycle).toBeNull()
