@@ -6,13 +6,14 @@ import { PAIRS } from '../engine/pairs'
 import { useAppStore, type ThemeName } from '../store/useAppStore'
 import { useServer } from '../store/server'
 import { NotifyWatcher, Toasts } from './NotifyWatcher'
+import { WhatsAppIcon } from './ui'
+import { CONTACT, waLink } from '../config'
 
 const navItems = [
   ['/', 'Overview', 'home'], ['/desk', 'Live Desk', 'desk'], ['/server', 'Auto Trader', 'server'], ['/copy', 'Copy Trades', 'copy'], ['/alerts', 'Alerts', 'bell'], ['/charts', 'Charts', 'charts'], ['/log', 'Log', 'log'],
   ['/performance', 'Performance', 'performance'], ['/accuracy', 'Accuracy', 'accuracy'], ['/settings', 'Settings', 'settings'], ['/about', 'About', 'about'],
 ] as const
 const THEMES: ThemeName[] = ['midnight', 'emerald', 'amber', 'violet', 'light', 'contrast']
-const DISCLAIMER = 'Educational tool, paper trading only, not financial advice. Binary options and leveraged forex carry a high risk of loss.'
 
 export function Layout() {
   const loc = useLocation(), s = useAppStore(), srv = useServer((x) => x.data), running = !!srv?.enabled, cycle = srv?.cycle ?? null
@@ -22,7 +23,7 @@ export function Layout() {
       <aside className="sidebar">
         <div className="sidebar-top"><Logo /></div>
         <nav className="nav">{navItems.map(([to, label, icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}><Icon name={icon} />{label}</NavLink>)}</nav>
-        <footer className="site-footer">{DISCLAIMER}</footer>
+        <div className="side-cta"><strong>Join the journey</strong><span>Interested in riding along?</span><NavLink to="/about#contact" className="btn primary">Get in touch</NavLink></div>
       </aside>
       <div className="content-panel">
         <header className="toolbar">
@@ -35,7 +36,8 @@ export function Layout() {
           </div>
         </header>
         <main className="page-content"><ErrorBoundary resetKey={loc.pathname}><Outlet /></ErrorBoundary></main>
-        <footer className="app-footer">{DISCLAIMER}</footer>
+        <footer className="app-footer"><div className="foot-grid"><span>© {new Date().getFullYear()} Hedge Signal Desk</span><span><a href={waLink(CONTACT.phones[0].wa)} target="_blank" rel="noopener noreferrer">WhatsApp {CONTACT.phones[0].display}</a> · <a href={waLink(CONTACT.phones[1].wa)} target="_blank" rel="noopener noreferrer">{CONTACT.phones[1].display}</a></span><span>Not affiliated with Quotex or Exness. Trading carries a high risk of loss.</span></div></footer>
+        <a className="wa-float" href={waLink(CONTACT.phones[0].wa)} target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp"><WhatsAppIcon size={28} /></a>
       </div>
       <nav className="bottom-nav" aria-label="Pages">{navItems.map(([to, label, icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `bn-item ${isActive ? 'active' : ''}`}><Icon name={icon} size={22} /><span>{label}</span></NavLink>)}</nav>
     </div>
