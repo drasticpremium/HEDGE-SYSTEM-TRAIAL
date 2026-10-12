@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { CONTACT, waLink } from '../config'
 import { Icon } from '../components/Icon'
-import { Faq, FeatureCard, Reveal, Section, WhatsAppIcon } from '../components/ui'
+import { Faq, FeatureCard, HeroArt, Reveal, Section, WhatsAppIcon } from '../components/ui'
 
 const FAQ: [string, string][] = [
   ['What is Hedge Signal Desk?', 'It is a trading desk built around using a Quotex binary and an Exness position at the same time on EUR/USD. It watches the live market, gives clear signals at set times, logs every trade on both sides, and sends alerts to your phone.'],
@@ -25,6 +25,7 @@ export function AboutPage() {
   return (
     <div className="about">
       <header className="about-hero">
+        <div className="about-art" aria-hidden="true"><HeroArt /></div>
         <span className="eyebrow rise" style={{ animationDelay: '0ms' }}>Hedge Signal Desk</span>
         <h1 className="rise" style={{ animationDelay: '80ms' }}>Two platforms. One disciplined system.</h1>
         <p className="lead rise" style={{ animationDelay: '160ms' }}>Hedge Signal Desk watches the live EUR/USD market and runs a Quotex binary and an Exness position side by side, so every decision is tracked, measured and accountable. I am building it in the open and I am looking for people who want to ride this journey with me.</p>

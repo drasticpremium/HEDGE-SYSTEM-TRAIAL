@@ -1,11 +1,14 @@
 // Cloudflare Worker: serves the site and /api/*, and runs the 24/7 paper trader every minute (cron) inside a Durable Object.
-import { newState, decide, processCandle, previewNotices, isTradingSession, signalMessage, noTradeMessage, cycleMessage, summaryText, setCapital, clearAuto, defaultSettings, type EngineState, type Notice } from '../engine/serverCore'
+import { newState, decide, processCandle, previewNotices, isTradingSession, signalMessage, noTradeMessage, cycleMessage, summaryText, setCapital, clearAuto, validateSettings, defaultSettings, type EngineState, type Notice } from '../engine/serverCore'
 import { addCopy, newCopy, pnlUsd, processCopyCandle, type CopyInput } from '../engine/copyCore'
 import { parseChannelName, parseChannelHtml, toCopyInput } from '../engine/tgFeed'
 import { parseSignal } from '../engine/signalParser'
 import type { Candle } from '../engine/math'
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+const TG_HEADERS = { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', 'accept-language': 'en-US,en;q=0.9', accept: 'text/html,application/xhtml+xml' }
+const tgPage = (name: string) => fetch(`https://t.me/s/${name}`, { headers: TG_HEADERS, redirect: 'follow', signal: AbortSignal.timeout(8000) })
+const cap = (x: unknown) => { const v = Number(x); if (!Number.isFinite(v) || v <= 0 || v > 1e9) throw new Error('Capital must be a positive number'); return v }
 const sym = (p: string) => `${p.slice(0, 3)}/${p.slice(3)}`
 const series = (j: any, tf: number, now: number): Candle[] => (j.values ?? []).map((v: any) => ({ t: Date.parse(String(v.datetime).replace(' ', 'T') + 'Z'), o: +v.open, h: +v.high, l: +v.low, c: +v.close })).filter((c: Candle) => c.t + tf <= now + 1000)
 const view = (s: EngineState, env: any) => ({
@@ -41,20 +44,24 @@ export class Engine {
       try {
         if (b.action === 'pause') s.enabled = false
         else if (b.action === 'resume') s.enabled = true
-        else if (b.action === 'settings') { for (const [k, v] of Object.entries(b.settings ?? {})) if (k !== 'recoveryOn' && k in defaultSettings && typeof v === typeof (defaultSettings as any)[k] && (typeof v !== 'number' || Number.isFinite(v))) (s.settings as any)[k] = v; testResult = 'Settings saved' }
+        else if (b.action === 'settings') { const v = validateSettings(b.settings, s.settings); if (!v.ok) throw new Error(v.error); Object.assign(s.settings, v.values); testResult = 'Settings saved' }
         else if (b.action === 'ladder') { s.settings.recoveryOn = !!b.on; if (!b.on) { s.ladder = 0; s.ladderDir = null }; testResult = b.on ? 'Recovery ladder is ON' : 'Recovery ladder is OFF' }
         else if (b.action === 'feed_add') {
           const name = parseChannelName(String(b.url ?? ''))
           if (!name) throw new Error('Use a public channel link like https://t.me/channelname (private invite links cannot be read)')
           if (s.copy.feeds.some((f) => f.name.toLowerCase() === name.toLowerCase())) throw new Error('That channel is already added')
           if (s.copy.feeds.length >= 5) throw new Error('Maximum 5 channels')
-          const r = await fetch(`https://t.me/s/${name}`, { headers: { 'user-agent': 'Mozilla/5.0 (compatible; HedgeSignalDesk)' } }), posts = r.ok ? parseChannelHtml(await r.text()) : []
-          if (!posts.length) throw new Error('Could not read posts. The channel must be public, have the web preview on, and have text posts.')
-          s.copy.feeds.push({ id: s.nextId++, name, enabled: true, lastId: posts[posts.length - 1].id, checked: Date.now(), found: posts.length, copied: 0, ignored: 0, error: '' }); testResult = `Watching @${name} (${posts.length} recent posts seen). Only NEW signals from now on are copied.`
+          const r = await tgPage(name).catch((e: any) => { throw new Error(`Could not reach Telegram (${e.message}). Try again in a minute.`) })
+          if (r.status === 404) throw new Error(`Telegram says @${name} does not exist. Check the spelling of the link.`)
+          if (!r.ok) throw new Error(`Telegram answered ${r.status} for @${name}. Try again in a minute.`)
+          const posts = parseChannelHtml(await r.text(), true)
+          if (!posts.length) throw new Error(r.url.includes('/s/') ? `No posts are visible for @${name}. The channel may be private or empty.` : `@${name} has its web preview turned off, so it cannot be read. Only public channels with preview on work.`)
+          const withText = posts.filter((p) => p.text).length
+          s.copy.feeds.push({ id: s.nextId++, name, enabled: true, lastId: posts[posts.length - 1].id, checked: Date.now(), found: posts.length, copied: 0, ignored: 0, error: '' }); testResult = `Watching @${name}: ${posts.length} recent posts visible, ${withText} with text. Only NEW signals from now on are copied.`
         } else if (b.action === 'feed_remove') { s.copy.feeds = s.copy.feeds.filter((f) => f.id !== b.id); testResult = 'Channel removed' }
         else if (b.action === 'feed_toggle') { const f = s.copy.feeds.find((x) => x.id === b.id); if (f) f.enabled = !!b.on; testResult = b.on ? 'Channel resumed' : 'Channel paused' }
-        else if (b.action === 'capital') { setCapital(s, +b.binaryGhs, +b.exnessGhs); testResult = 'Capital updated (history kept)' }
-        else if (b.action === 'reset') { if (b.binaryGhs && b.exnessGhs) setCapital(s, +b.binaryGhs, +b.exnessGhs); clearAuto(s); testResult = 'Auto trader data cleared and accounts reset' }
+        else if (b.action === 'capital') { setCapital(s, cap(b.binaryGhs), cap(b.exnessGhs)); testResult = 'Capital updated (history kept)' }
+        else if (b.action === 'reset') { if (b.binaryGhs !== undefined || b.exnessGhs !== undefined) setCapital(s, cap(b.binaryGhs), cap(b.exnessGhs)); clearAuto(s); testResult = 'Auto trader data cleared and accounts reset' }
         else if (b.action === 'telegram_test') testResult = (await tg(this.env, '✅ <b>Test message</b> from Hedge Signal Desk. Alerts are working. 🔵 BUY · 🔴 SELL')) || 'Telegram test message sent'
         else if (b.action === 'copy_add') {
           const t = b.trade as CopyInput
@@ -134,14 +141,15 @@ export class Engine {
     for (const f of s.copy.feeds) {
       if (!f.enabled) continue
       try {
-        const r = await fetch(`https://t.me/s/${f.name}`, { headers: { 'user-agent': 'Mozilla/5.0 (compatible; HedgeSignalDesk)' } })
+        const r = await tgPage(f.name)
         if (!r.ok) { f.error = `Telegram returned ${r.status}`; continue }
-        const posts = parseChannelHtml(await r.text()); f.checked = now; f.found = posts.length
-        if (!posts.length) { f.error = 'No text posts visible (channel private or preview disabled)'; continue }
+        const posts = parseChannelHtml(await r.text(), true); f.checked = now; f.found = posts.length
+        if (!posts.length) { f.error = r.url.includes('/s/') ? 'No posts visible (channel private or empty)' : 'Web preview is turned off for this channel'; continue }
         f.error = ''
         for (const p of posts.filter((x) => x.id > f.lastId).slice(0, 8)) {
           f.lastId = p.id
           const log = (status: 'copied' | 'ignored', note: string) => { if (status === 'ignored') f.ignored++; else f.copied++; s.copy.log.unshift({ time: new Date(now).toISOString(), channel: f.name, msgId: p.id, status, note, text: p.text.slice(0, 160) }); if (s.copy.log.length > 80) s.copy.log.pop() }
+          if (!p.text) { log('ignored', 'image or media post, text cannot be read'); continue }
           const q = parseSignal(p.text)
           if (!q.pair || !q.side) { log('ignored', 'not a trade signal'); continue }
           if (!canPrice) { log('ignored', 'skipped: data credits are reserved for the auto trader'); continue }

@@ -4,6 +4,7 @@ import { TradeChart } from '../components/TradeChart'
 import { SignalCards } from '../components/SignalHistory'
 import { Pill } from '../components/Pill'
 import { AdminToken } from '../components/AdminToken'
+import { Flash, Skeleton } from '../components/ui'
 import { winProbability } from '../engine/math'
 import { pipSize, pipValuePerLot } from '../engine/pairs'
 import { isTradingSession } from '../engine/serverCore'
@@ -13,7 +14,7 @@ const cd = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); retur
 export function DeskPage() {
   const d = useServer((s) => s.data), error = useServer((s) => s.error), control = useServer((s) => s.control), [now, setNow] = useState(Date.now()), [copied, setCopied] = useState(''), [msg, setMsg] = useState('')
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(i) }, [])
-  if (!d) return <div className="page-grid"><section className="panel card wide"><h2>Live Desk</h2><p className="empty">{error || 'Connecting to the server...'}</p></section></div>
+  if (!d) return <div className="page-grid"><section className="panel card wide"><h2>Live Desk</h2>{error ? <p className="empty">{error}</p> : <div className="skel-grid"><Skeleton h={120} /><Skeleton h={120} /><Skeleton h={120} /></div>}</section></div>
   const pair = d.signals[0]?.pair ?? Object.keys(d.candles)[0] ?? 'EURUSD', m1 = d.candles[pair] ?? [], price = d.prices[pair] ?? m1[m1.length - 1]?.c, pip = pipSize(pair), pv = pipValuePerLot(pair), dp = pair.endsWith('JPY') ? 3 : 5, f = (x: number) => x.toFixed(dp)
   const last = d.signals[0], t = d.signals.find((s) => s.kind === 'TRADE' && s.pair === pair && Date.parse(s.expiry!) > now) ?? null
   const sg = t?.dir === 'CALL' ? 1 : -1, fav = t && price ? ((price - t.price) / pip) * sg : 0, left = t ? (Date.parse(t.expiry!) - now) / 60000 : 0, c = d.cycle && d.cycle.pair === pair ? d.cycle : null
@@ -25,7 +26,7 @@ export function DeskPage() {
     <div className="page-grid">
       <section className="panel card"><h2>{pair} decision</h2>
         <div className={`state ${t ? 'ready' : 'none'}`} style={!t && last ? { background: 'var(--bad)', color: '#2a0608' } : undefined}>{state}</div>
-        <p className="big">{price ? f(price) : '...'}</p>
+        <p className="big"><Flash value={price}>{price ? f(price) : '...'}</Flash></p>
         <p>Live real-market price (1-minute candles). Next decision in <strong>{inWindow ? cd(next - now) : 'next session'}</strong>{inWindow ? ` at ${hms(next).slice(0, 5)} GMT` : ''}.</p>
         {(d.ladder ?? 0) > 0 && d.settings.recoveryOn && <p className="down"><strong>🔁 Recovery {d.ladder} queued: the next candle will be traded regardless of the signal, in the same direction as the first trade{d.ladder === 2 ? ", with double stake and lots" : ""}.</strong></p>}
         <p className="mut">Decisions happen at the open of every 15-minute candle, 08:00 to 16:45 GMT, Mon to Fri. Session now: {sessionOpen ? 'OPEN' : 'CLOSED'}.</p>

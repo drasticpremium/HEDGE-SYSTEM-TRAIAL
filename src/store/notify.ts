@@ -10,6 +10,12 @@ export const useNotify = create<{ toasts: Toast[]; prefs: Prefs; setPref: (k: ke
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }))
 const beep = () => { try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 760; o.start(); o.stop(c.currentTime + 0.2) } catch { /* sound blocked */ } }
+/** In-site message only (no sound or system notification): used to confirm or explain the result of a button press. */
+export function toast(title: string, body: string, tone: Toast['tone'] = 'info') {
+  const id = ++n
+  useNotify.setState((s) => ({ toasts: [...s.toasts, { id, title, body, tone }].slice(-4) }))
+  setTimeout(() => useNotify.getState().dismiss(id), 9000)
+}
 /** In-site pop-up, plus a system notification (desktop or phone) when permission is granted. */
 export function notify(title: string, body: string, tone: Toast['tone'] = 'info') {
   const { prefs } = useNotify.getState(), id = ++n

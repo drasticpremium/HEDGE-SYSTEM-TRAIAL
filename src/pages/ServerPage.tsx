@@ -3,6 +3,7 @@ import { useServer } from '../store/server'
 import { formatMoney, useAppStore } from '../store/useAppStore'
 import { favPips } from '../engine/cycle'
 import { SignalCards } from '../components/SignalHistory'
+import { Skeleton } from '../components/ui'
 import { TradeChart, cycleLevels, cycleBox } from '../components/TradeChart'
 
 export function ServerPage() {
@@ -10,7 +11,7 @@ export function ServerPage() {
   const [token, setToken] = useState(sessionStorage.adminToken ?? ''), [msg, setMsg] = useState('')
   const m = (v: number) => formatMoney(v, a.currencyUnit, a.ghcPerUsd)
   const act = async (body: object) => { sessionStorage.adminToken = token; setMsg((await control(body, token)) || 'Done') }
-  if (!data) return <div className="page-grid"><section className="panel card wide"><h2>24/7 Server</h2><p className="empty">{error || 'Loading server state...'}</p></section></div>
+  if (!data) return <div className="page-grid"><section className="panel card wide"><h2>24/7 Server</h2>{error ? <p className="empty">{error}</p> : <div className="skel-grid"><Skeleton h={110} /><Skeleton h={110} /><Skeleton h={110} /></div>}</section></div>
   const pair = data.cycle?.pair ?? Object.keys(data.candles)[0] ?? 'EURUSD', c = data.cycle, ageMin = Math.round((Date.now() - data.lastTick) / 60000)
   const net = data.cycles.reduce((x, r) => x + r.netPnl, 0), wins = data.cycles.filter((r) => r.binaryResult === 'WIN').length
   const kpi = (l: string, v: string, tone = '') => <div className="kpi"><span>{l}</span><strong className={tone}>{v}</strong></div>

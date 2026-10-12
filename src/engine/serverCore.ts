@@ -166,3 +166,19 @@ ${ic(day)} Today: ${day.length} cycles, ${day.length ? f(net(day)) : 'no trades'
 🔵 Quotex account GH₵${(binary * rate).toFixed(2)}
 🟠 Exness account GH₵${(exness * rate).toFixed(2)}`
 }
+
+const RANGES: Record<string, [number, number]> = { stakeUsd: [0.5, 5000], payoutMin: [50, 100], payoutMax: [50, 100], maxLots: [0.01, 50], stopUsd: [0.1, 100000], tpUsd: [0.1, 100000], commission: [0, 100], counterWindowMin: [1, 14], counterMinLeft: [0, 14], minStrength: [0, 100], leverage: [1, 3000], ghsPerUsd: [1, 1000], copyLots: [0.01, 50], recoveryMult: [1, 5], leadMin: [1, 5] }
+/** Checks a settings patch from the website. Returns the cleaned values to apply, or an error to show. Unknown keys and recoveryOn (the button owns that) are ignored. */
+export function validateSettings(patch: Record<string, unknown>, current: Settings): { ok: true; values: Partial<Settings> } | { ok: false; error: string } {
+  const values: Record<string, number | boolean> = {}
+  for (const [k, v] of Object.entries(patch ?? {})) {
+    if (k === 'recoveryOn' || !(k in defaultSettings)) continue
+    const want = typeof (defaultSettings as unknown as Record<string, unknown>)[k]
+    if (typeof v !== want) return { ok: false, error: `${k} must be a ${want}` }
+    if (want === 'number') { const r = RANGES[k], n = v as number; if (!Number.isFinite(n) || (r && (n < r[0] || n > r[1]))) return { ok: false, error: `${k} must be between ${r?.[0]} and ${r?.[1]}` } }
+    values[k] = v as number | boolean
+  }
+  const min = (values.payoutMin ?? current.payoutMin) as number, max = (values.payoutMax ?? current.payoutMax) as number
+  if (min > max) return { ok: false, error: 'Payout minimum cannot be above the maximum' }
+  return { ok: true, values: values as Partial<Settings> }
+}

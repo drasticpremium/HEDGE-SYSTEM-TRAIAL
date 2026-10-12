@@ -4,6 +4,7 @@ import { useServer } from '../store/server'
 import { useCycles } from '../db/useCycles'
 import { cumulative, currentStreak } from '../engine/stats'
 import { EquityChart } from '../components/EquityChart'
+import { HeroArt } from '../components/ui'
 import { pipSize } from '../engine/pairs'
 
 export function OverviewPage() {
@@ -22,10 +23,7 @@ export function OverviewPage() {
           <p>Your paper account runs a Quotex binary and an opposite Exness hedge on every clean signal, and logs each cycle so the edge is measured, not guessed.</p>
           <div className="button-row"><Link className="btn primary" to="/desk">Open Live Desk</Link><Link className="btn" to="/auto">Watch auto trader</Link><Link className="btn" to="/log">View trade log</Link><Link className="btn" to="/about#contact">Join the journey</Link></div>
         </div>
-        <svg viewBox="0 0 220 140" className="hero-art" aria-hidden="true">
-          {[20, 52, 84, 116, 148, 180].map((x, i) => { const up = i % 2 === 0, h = 30 + ((i * 17) % 40), y = 90 - h / 2 - (i * 4) % 20; return <g key={x}><line x1={x + 8} x2={x + 8} y1={y - 12} y2={y + h + 12} stroke="var(--mut)" /><rect x={x} y={y} width="16" height={h} rx="3" fill={up ? 'var(--ok)' : 'var(--bad)'} /></g> })}
-          <path d="M10 112 Q70 30 110 70 T210 24" fill="none" stroke="var(--ac)" strokeWidth="3" strokeLinecap="round" />
-        </svg>
+        <HeroArt />
       </section>
       <section className="panel card wide kpis">
         {kpi('Combined balance', m(equity))}{kpi('Binary account', m((srv?.binary ?? 0)))}{kpi('Exness account', m((srv?.exness ?? 0)))}

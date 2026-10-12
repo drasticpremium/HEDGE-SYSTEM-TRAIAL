@@ -2,17 +2,17 @@ import { parseSignal } from './signalParser'
 import type { CopyInput } from './copyCore'
 /** Reads the public web preview of a Telegram channel (https://t.me/s/NAME). Works only for PUBLIC channels with the preview enabled. Text posts only, images are not read. */
 export function parseChannelName(input: string): string | null {
-  const t = input.trim().replace(/^@/, '')
-  const m = t.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/(?:s\/)?([A-Za-z0-9_]{4,})\/?/i) ?? t.match(/^([A-Za-z0-9_]{4,})$/)
+  const t = input.replace(/[\u200b-\u200f\u2060\ufeff]/g, '').trim()
+  const m = t.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/(?:s\/)?([A-Za-z0-9_]{4,32})/i) ?? t.match(/^@?([A-Za-z0-9_]{4,32})$/)
   return m && !m[1].startsWith('+') && m[1].toLowerCase() !== 'joinchat' ? m[1] : null
 }
 const ENT: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 export const htmlToText = (h: string) => h.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (_, e: string) => (e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : ENT[e.toLowerCase()] ?? '')).trim()
-export function parseChannelHtml(html: string): { id: number; text: string; time: string }[] {
+export function parseChannelHtml(html: string, includeEmpty = false): { id: number; text: string; time: string }[] {
   const out: { id: number; text: string; time: string }[] = []
   for (const chunk of html.split('data-post="').slice(1)) {
     const id = Number(chunk.match(/^[^"]*\/(\d+)"/)?.[1]), tx = chunk.match(/class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/)
-    if (id && tx) out.push({ id, text: htmlToText(tx[1]), time: chunk.match(/<time[^>]*datetime="([^"]+)"/)?.[1] ?? '' })
+    if (id && (tx || includeEmpty)) out.push({ id, text: tx ? htmlToText(tx[1]) : '', time: chunk.match(/<time[^>]*datetime="([^"]+)"/)?.[1] ?? '' })
   }
   return out.sort((a, b) => a.id - b.id)
 }

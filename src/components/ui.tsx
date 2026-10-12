@@ -24,3 +24,20 @@ export const Faq = ({ items }: { items: [string, string][] }) => (
 export const WhatsAppIcon = ({ size = 26 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 00-8.6 15.1L2 22l5-1.3A10 10 0 1012 2zm0 18.1a8.1 8.1 0 01-4.3-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.1 8.1 0 1112 20.1z" /><path transform="translate(6.2 6.2) scale(.49)" d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
 )
+
+/** Animated candles and trend line used in the hero sections. Pure SVG + CSS, no images. */
+export function HeroArt() {
+  return (
+    <svg viewBox="0 0 220 140" className="hero-art" aria-hidden="true">
+      {[20, 52, 84, 116, 148, 180].map((x, i) => { const up = i % 2 === 0, h = 30 + ((i * 17) % 40), y = 90 - h / 2 - ((i * 4) % 20); return <g key={x} className="candle" style={{ animationDelay: `${i * 110}ms` }}><line x1={x + 8} x2={x + 8} y1={y - 12} y2={y + h + 12} stroke="var(--mut)" /><rect x={x} y={y} width="16" height={h} rx="3" fill={up ? 'var(--ok)' : 'var(--bad)'} /></g> })}
+      <path className="art-line" pathLength="1" d="M10 112 Q70 30 110 70 T210 24" fill="none" stroke="var(--ac)" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  )
+}
+export const Skeleton = ({ h = 90 }: { h?: number }) => <div className="skeleton" style={{ height: h }} aria-hidden="true" />
+/** Briefly tints a changing number green (up) or red (down). */
+export function Flash({ value, children }: { value: number | undefined; children: ReactNode }) {
+  const prev = useRef(value), [dir, setDir] = useState<'' | 'up' | 'down'>(''), [k, setK] = useState(0)
+  useEffect(() => { if (prev.current !== undefined && value !== undefined && value !== prev.current) { setDir(value > prev.current ? 'up' : 'down'); setK((n) => n + 1) } prev.current = value }, [value])
+  return <span key={k} className={`flash ${dir ? 'flash-' + dir : ''}`}>{children}</span>
+}
