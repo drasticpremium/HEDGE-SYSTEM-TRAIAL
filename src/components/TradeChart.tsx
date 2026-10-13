@@ -12,7 +12,7 @@ export function cycleLevels(c: Cycle): Level[] {
 export const cycleBox = (c: Cycle): PosBox => { const sg = c.dir === 'CALL' ? 1 : -1; return { t0: c.openT, t1: c.expiryT, entry: c.entry, sl: c.entry + sg * c.stopPips * c.pip, tp: c.entry - sg * c.tpPips * c.pip, slPips: c.stopPips, tpPips: c.tpPips, quotex: c.dir === 'CALL' ? 'BUY' : 'SELL' } }
 const sec = (t: number) => Math.floor(t / 1000) as UTCTimestamp
 export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: { candles: Candle[]; levels: Level[]; box?: PosBox | null; digits?: number; height?: number }) {
-  const el = useRef<HTMLDivElement>(null), chart = useRef<IChartApi | null>(null), series = useRef<ISeriesApi<'Candlestick'> | null>(null), lines = useRef<IPriceLine[]>([]), prev = useRef({ n: 0, t: 0 }), [, force] = useState(0)
+  const el = useRef<HTMLDivElement>(null), chart = useRef<IChartApi | null>(null), series = useRef<ISeriesApi<'Candlestick'> | null>(null), lines = useRef<IPriceLine[]>([]), prev = useRef({ n: 0, t: 0 }), [, force] = useState(0), rangeRef = useRef<{ lo: number; hi: number } | null>(null)
   useEffect(() => {
     const c = createChart(el.current!, { autoSize: true, layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#9db0ce' }, grid: { vertLines: { color: 'rgba(120,140,170,.12)' }, horzLines: { color: 'rgba(120,140,170,.12)' } }, timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 22 } })
     series.current = c.addCandlestickSeries({ upColor: '#2ecc8f', downColor: '#ff6d7a', wickUpColor: '#2ecc8f', wickDownColor: '#ff6d7a', borderVisible: false, priceFormat: { type: 'price', precision: digits, minMove: 1 / 10 ** digits } })
@@ -34,7 +34,11 @@ export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: {
   useEffect(() => {
     const s = series.current; if (!s) return
     lines.current.forEach((l) => s.removePriceLine(l)); lines.current = levels.map((l) => s.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: l.label }))
-  }, [key, digits, !!last])
+    // Make the price scale include entry, stop and take profit, so every box is drawn exactly between its own price limits instead of being squashed or clipped.
+    const ps = [...levels.map((l) => l.price), ...(box ? [box.entry, box.sl, box.tp] : [])]
+    rangeRef.current = ps.length ? { lo: Math.min(...ps), hi: Math.max(...ps) } : null
+    s.applyOptions({ autoscaleInfoProvider: (orig: () => any) => { const r = orig(), x = rangeRef.current; if (!r || !x) return r; const pad = (Math.max(r.priceRange.maxValue, x.hi) - Math.min(r.priceRange.minValue, x.lo)) * 0.08; return { priceRange: { minValue: Math.min(r.priceRange.minValue, x.lo) - pad, maxValue: Math.max(r.priceRange.maxValue, x.hi) + pad }, margins: r.margins } } } as never)
+  }, [key, digits, !!last, box?.entry, box?.sl, box?.tp])
   useEffect(() => { if (!box) return; const i = setInterval(() => force((n) => n + 1), 250); return () => clearInterval(i) }, [box])
   let rect: JSX.Element | null = null
   const c = chart.current, s = series.current

@@ -36,7 +36,7 @@ export function Layout() {
           </div>
         </header>
         <main className="page-content"><ErrorBoundary resetKey={loc.pathname}><div key={loc.pathname} className="route"><Outlet /></div></ErrorBoundary></main>
-        <footer className="app-footer"><div className="foot-grid"><span>© {new Date().getFullYear()} Hedge Signal Desk</span><span><a href={waLink(CONTACT.phones[0].wa)} target="_blank" rel="noopener noreferrer">WhatsApp {CONTACT.phones[0].display}</a> · <a href={waLink(CONTACT.phones[1].wa)} target="_blank" rel="noopener noreferrer">{CONTACT.phones[1].display}</a></span><span>Not affiliated with Quotex or Exness. Trading carries a high risk of loss.</span></div></footer>
+        <footer className="app-footer"><div className="foot-grid"><span>© {new Date().getFullYear()} Hedge Signal Desk</span><span><a href={waLink(CONTACT.phones[0].wa)} target="_blank" rel="noopener noreferrer">WhatsApp {CONTACT.phones[0].display}</a> · <a href={waLink(CONTACT.phones[1].wa)} target="_blank" rel="noopener noreferrer">{CONTACT.phones[1].display}</a></span><span>Not affiliated with Quotex or Exness. Trading carries a high risk of loss. <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener noreferrer">Rates By Exchange Rate API</a></span></div></footer>
         <a className="wa-float" href={waLink(CONTACT.phones[0].wa)} target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp"><WhatsAppIcon size={28} /></a>
       </div>
       <nav className="bottom-nav" aria-label="Pages">{navItems.map(([to, label, icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `bn-item ${isActive ? 'active' : ''}`}><Icon name={icon} size={22} /><span>{label}</span></NavLink>)}</nav>

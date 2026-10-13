@@ -7,17 +7,19 @@ import type { CycleLogRow, SignalRow } from '../db/db'
 
 /** Mon-Fri, 08:00-17:00 GMT. Entries happen at 15-minute opens from 08:00 to 16:45 so the 15-minute binary ends by 17:00. */
 export const isTradingSession = (t: number) => { const d = new Date(t), day = d.getUTCDay(); return day >= 1 && day <= 5 && d.getUTCHours() >= 8 && d.getUTCHours() < 17 }
-export interface Settings { stakeUsd: number; payoutMin: number; payoutMax: number; maxLots: number; autoLots: boolean; stopUsd: number; tpUsd: number; commission: number; counterWindowMin: number; counterMinLeft: number; minStrength: number; ghsPerUsd: number; leverage: number; tgNoTrade: boolean; copyLots: number; recoveryOn: boolean; recoveryMult: number; headsUp: boolean; leadMin: number }
-export const defaultSettings: Settings = { stakeUsd: 5, payoutMin: 91, payoutMax: 95, maxLots: 0.2, autoLots: true, stopUsd: 8, tpUsd: 15, commission: 9, counterWindowMin: 5, counterMinLeft: 1, minStrength: 60, ghsPerUsd: 11, leverage: 500, tgNoTrade: true, copyLots: 0.01, recoveryOn: false, recoveryMult: 2, headsUp: true, leadMin: 2 }
+export interface Settings { stakeUsd: number; payoutMin: number; payoutMax: number; maxLots: number; autoLots: boolean; stopUsd: number; tpUsd: number; commission: number; counterWindowMin: number; counterMinLeft: number; minStrength: number; ghsPerUsd: number; leverage: number; tgNoTrade: boolean; copyLots: number; recoveryOn: boolean; recoveryMult: number; headsUp: boolean; leadMin: number; hedgeCapPct: number }
+export const defaultSettings: Settings = { stakeUsd: 5, payoutMin: 91, payoutMax: 95, maxLots: 0.2, autoLots: true, stopUsd: 8, tpUsd: 15, commission: 9, counterWindowMin: 5, counterMinLeft: 1, minStrength: 60, ghsPerUsd: 11, leverage: 500, tgNoTrade: true, copyLots: 0.01, recoveryOn: false, recoveryMult: 2, headsUp: true, leadMin: 2, hedgeCapPct: 30 }
 export type Notice = { kind: 'signal'; row: SignalRow } | { kind: 'cycle'; row: CycleLogRow } | { kind: 'notrade'; pair: string; time: string; reasons: string[] } | { kind: 'info'; text: string }
 export interface EngineState {
-  v?: number; enabled: boolean; news: boolean; binary: number; exness: number; capital: { binary: number; exness: number }; status: string; lastTick: number; lastDecision: number; nextId: number; ladderMode?: number; ladder?: number; ladderDir?: 'CALL' | 'PUT' | null; heads?: { open: number; dir: 'CALL' | 'PUT' | null; rec: number }; headsKey?: string
+  v?: number; fx?: { rate: number; at: number; tried?: number; src: string; error?: string }; enabled: boolean; news: boolean; binary: number; exness: number; capital: { binary: number; exness: number }; status: string; lastTick: number; lastDecision: number; nextId: number; ladderMode?: number; ladder?: number; ladderDir?: 'CALL' | 'PUT' | null; heads?: { open: number; dir: 'CALL' | 'PUT' | null; rec: number }; headsKey?: string
   candles: Record<string, Candle[]>; m15: Record<string, Candle[]>; h1: Record<string, Candle[]>; h1At: Record<string, number>; prices: Record<string, number>
   cycle: Cycle | null; cycles: CycleLogRow[]; signals: SignalRow[]; credits: { day: string; n: number }; lastReport?: string; settings: Settings; copy: CopyState
 }
 export const START_USD = 250 / 11
+/** GH₵ per USD: the live rate when fresh (under 48 hours old), otherwise the fallback value in settings. */
+export const rateOf = (s: EngineState, now = Date.now()) => (s.fx && Number.isFinite(s.fx.rate) && s.fx.rate > 1 && now - s.fx.at < 48 * 3600000 ? s.fx.rate : s.settings.ghsPerUsd)
 export const newState = (): EngineState => ({ v: 2, enabled: true, news: false, binary: START_USD, exness: START_USD, capital: { binary: START_USD, exness: START_USD }, status: 'Starting', lastTick: 0, lastDecision: 0, nextId: 1, ladderMode: 2, ladder: 0, candles: {}, m15: {}, h1: {}, h1At: {}, prices: {}, cycle: null, cycles: [], signals: [], credits: { day: '', n: 0 }, settings: { ...defaultSettings }, copy: newCopy() })
-export function setCapital(s: EngineState, binaryGhs: number, exnessGhs: number) { const r = s.settings.ghsPerUsd; s.capital = { binary: binaryGhs / r, exness: exnessGhs / r }; s.binary = s.capital.binary; s.exness = s.capital.exness }
+export function setCapital(s: EngineState, binaryGhs: number, exnessGhs: number) { const r = rateOf(s); s.capital = { binary: binaryGhs / r, exness: exnessGhs / r }; s.binary = s.capital.binary; s.exness = s.capital.exness }
 /** Clears cycles, signals and the open trade, and puts both accounts back to the starting capital. Copy trading is untouched. */
 export function clearAuto(s: EngineState) { s.cycle = null; s.cycles = []; s.signals = []; s.nextId = 1; s.ladder = 0; s.ladderDir = null; s.heads = undefined; s.binary = s.capital.binary; s.exness = s.capital.exness; s.lastDecision = 0 }
 
@@ -35,7 +37,9 @@ export function plan(s: EngineState, pair: string, price: number, o: { m15?: Can
   const vol = Math.max(1, realizedVol15((s.candles[pair] ?? []).slice(-60).map((c) => c.c), pip) ?? 3.2)
   const base = st.autoLots ? Math.min(st.maxLots, Math.max(0.01, Math.floor((st.stopUsd / (1.25 * vol * pv)) * 100 + 1e-9) / 100)) : st.maxLots, desired = +(base * mult).toFixed(2)
   const perLot = ((pair.startsWith('USD') ? 1 : price * (pv / (100000 * pip))) * 100000) / st.leverage
-  let lots = desired; const room = s.exness * 0.9
+  // A stop must never cost more than the binary pays: stop money + commission <= hedgeCapPct of the stake x the LOWEST payout.
+  const p0 = (st.stopUsd * mult) / (desired * pv), capLots = Math.floor((((st.hedgeCapPct / 100) * stake * (st.payoutMin / 100)) / (p0 * pv + st.commission)) * 100 + 1e-9) / 100
+  let lots = Math.max(0.01, Math.min(desired, capLots)); const room = s.exness * 0.9
   if (lots * perLot > room) lots = Math.floor((room / perLot) * 100 + 1e-9) / 100
   if (lots < 0.01) { reasons.push('Exness balance is too small for even 0.01 lots'); lots = 0.01 }
   const f = Math.min(1, lots / desired)
@@ -131,7 +135,7 @@ ${dot(r.hedgeSide!)} <b>EXNESS: ${r.hedgeSide}</b> ${r.lots?.toFixed(2)} lots
 🛑 Stop ${r.sl?.toFixed(d)} (${r.stopPips}p · -$${r.stopUsd?.toFixed(2)})
 🎯 Take profit ${r.tp?.toFixed(d)} (${r.tpPips}p · +$${r.tpUsd?.toFixed(2)})
 ━━━━━━━━━━━━━━
-🔄 Counter: if the stop hits and price returns to ${counter.toFixed(d)} in the last 5 min, buy ${dot(cside)} <b>${cside}</b> $${r.stake?.toFixed(2)}, same expiry${r.scaled !== undefined && r.scaled < 1 ? `\n⚠️ Hedge scaled to ${(r.scaled * 100).toFixed(0)}% of plan to fit the Exness balance.` : ''}
+🔄 Counter: if the stop hits and price returns to ${counter.toFixed(d)} in the last 5 min, buy ${dot(cside)} <b>${cside}</b> $${r.stake?.toFixed(2)}, same expiry${r.scaled !== undefined && r.scaled < 1 ? `\n⚠️ Hedge sized to ${(r.scaled * 100).toFixed(0)}% of plan, so a stop never costs more than the binary pays.` : ''}
 📝 Paper signal. You trade manually elsewhere.`
 }
 export const noTradeMessage = (pair: string, time: string, reasons: string[]) => `⛔ <b>NO TRADE</b> · ${hm(time)} GMT · ${pair}
@@ -150,8 +154,8 @@ The Exness hedge is stopped. Watch for the counter window.`
   if (e.startsWith('TP_HIT')) return `🎯 <b>TAKE PROFIT HIT</b> · ${pair}
 Close the Exness hedge now.`
   const c = e.match(/^COUNTER_OPENED (CALL|PUT)/)
-  if (c) { const side = c[1] === 'CALL' ? 'BUY' : 'SELL'; return `⚡ <b>COUNTER NOW</b> · ${pair}
-Buy ${dot(side)} <b>${side}</b> with the same expiry.` }
+  if (c) { const side = c[1] === 'CALL' ? 'BUY' : 'SELL'; const px = e.match(/ at ([0-9.]+)/)?.[1]; return `⚡ <b>COUNTER NOW</b> · ${pair}
+Buy ${dot(side)} <b>${side}</b>${px ? ' at about ' + px : ''} with the same expiry.` }
   if (e.startsWith('COUNTER_CANCELLED')) return `⚠️ <b>Counter cancelled</b> · ${pair}
 ${esc(e.replace('COUNTER_CANCELLED ', ''))}`
   return `ℹ️ ${pair}: ${esc(e)}`
@@ -167,7 +171,7 @@ ${ic(day)} Today: ${day.length} cycles, ${day.length ? f(net(day)) : 'no trades'
 🟠 Exness account GH₵${(exness * rate).toFixed(2)}`
 }
 
-const RANGES: Record<string, [number, number]> = { stakeUsd: [0.5, 5000], payoutMin: [50, 100], payoutMax: [50, 100], maxLots: [0.01, 50], stopUsd: [0.1, 100000], tpUsd: [0.1, 100000], commission: [0, 100], counterWindowMin: [1, 14], counterMinLeft: [0, 14], minStrength: [0, 100], leverage: [1, 3000], ghsPerUsd: [1, 1000], copyLots: [0.01, 50], recoveryMult: [1, 5], leadMin: [1, 5] }
+const RANGES: Record<string, [number, number]> = { stakeUsd: [0.5, 5000], payoutMin: [50, 100], payoutMax: [50, 100], maxLots: [0.01, 50], stopUsd: [0.1, 100000], tpUsd: [0.1, 100000], commission: [0, 100], counterWindowMin: [1, 14], counterMinLeft: [0, 14], minStrength: [0, 100], leverage: [1, 3000], hedgeCapPct: [10, 100], ghsPerUsd: [1, 1000], copyLots: [0.01, 50], recoveryMult: [1, 5], leadMin: [1, 5] }
 /** Checks a settings patch from the website. Returns the cleaned values to apply, or an error to show. Unknown keys and recoveryOn (the button owns that) are ignored. */
 export function validateSettings(patch: Record<string, unknown>, current: Settings): { ok: true; values: Partial<Settings> } | { ok: false; error: string } {
   const values: Record<string, number | boolean> = {}

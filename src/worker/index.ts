@@ -1,5 +1,5 @@
 // Cloudflare Worker: serves the site and /api/*, and runs the 24/7 paper trader every minute (cron) inside a Durable Object.
-import { newState, decide, processCandle, previewNotices, isTradingSession, signalMessage, noTradeMessage, cycleMessage, summaryText, setCapital, clearAuto, validateSettings, defaultSettings, type EngineState, type Notice } from '../engine/serverCore'
+import { newState, decide, processCandle, previewNotices, isTradingSession, signalMessage, noTradeMessage, cycleMessage, summaryText, setCapital, clearAuto, validateSettings, defaultSettings, rateOf, type EngineState, type Notice } from '../engine/serverCore'
 import { addCopy, newCopy, pnlUsd, processCopyCandle, type CopyInput } from '../engine/copyCore'
 import { parseChannelName, parseChannelHtml, toCopyInput } from '../engine/tgFeed'
 import { parseSignal } from '../engine/signalParser'
@@ -13,7 +13,7 @@ const sym = (p: string) => `${p.slice(0, 3)}/${p.slice(3)}`
 const series = (j: any, tf: number, now: number): Candle[] => (j.values ?? []).map((v: any) => ({ t: Date.parse(String(v.datetime).replace(' ', 'T') + 'Z'), o: +v.open, h: +v.high, l: +v.low, c: +v.close })).filter((c: Candle) => c.t + tf <= now + 1000)
 const view = (s: EngineState, env: any) => ({
   telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), now: Date.now(), enabled: s.enabled, news: s.news, status: s.status, lastTick: s.lastTick, credits: s.credits, binary: s.binary, exness: s.exness, capital: s.capital, settings: s.settings,
-  ladder: s.ladder ?? 0, cycle: s.cycle, prices: s.prices, cycles: s.cycles.slice(0, 100), signals: s.signals.slice(0, 80), candles: Object.fromEntries(Object.entries(s.candles).map(([k, v]) => [k, v.slice(-150)])), copy: { balance: s.copy.balance, start: s.copy.start, trades: s.copy.trades.slice(0, 80), feeds: s.copy.feeds, log: s.copy.log.slice(0, 40) },
+  ladder: s.ladder ?? 0, fx: s.fx ?? null, rate: rateOf(s), cycle: s.cycle, prices: s.prices, cycles: s.cycles.slice(0, 100), signals: s.signals.slice(0, 80), candles: Object.fromEntries(Object.entries(s.candles).map(([k, v]) => [k, v.slice(-150)])), copy: { balance: s.copy.balance, start: s.copy.start, trades: s.copy.trades.slice(0, 80), feeds: s.copy.feeds, log: s.copy.log.slice(0, 40) },
 })
 async function tg(env: any, text: string): Promise<string> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return 'Telegram secrets not set (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)'
@@ -72,7 +72,7 @@ export class Engine {
           const t = s.copy.trades.find((x) => x.id === b.id)
           if (t && t.status === 'PENDING') { t.status = 'CANCELLED'; testResult = 'Pending order cancelled' }
           else if (t && t.status === 'OPEN') { const price = Number((await this.td(s, `price?symbol=${sym(t.pair)}`)).price), p = pnlUsd(t.pair, (price - t.fillPrice!) * (t.side === 'BUY' ? 1 : -1), t.remaining); t.realized += p; s.copy.balance += p; t.remaining = 0; t.status = 'CLOSED'; t.exit = 'Manual'; t.closedAt = new Date().toISOString(); testResult = `Closed at ${price}` }
-        } else if (b.action === 'copy_reset') { const feeds = s.copy.feeds.map((f) => ({ ...f, copied: 0, ignored: 0 })); s.copy = newCopy(b.ghs ? +b.ghs / s.settings.ghsPerUsd : s.copy.start); s.copy.feeds = feeds; testResult = 'Copy-trade data cleared (channels kept)' }
+        } else if (b.action === 'copy_reset') { const feeds = s.copy.feeds.map((f) => ({ ...f, copied: 0, ignored: 0 })); s.copy = newCopy(b.ghs ? cap(b.ghs) / rateOf(s) : s.copy.start); s.copy.feeds = feeds; testResult = 'Copy-trade data cleared (channels kept)' }
         else if (typeof b.news === 'boolean') s.news = b.news
       } catch (e: any) { testResult = 'Failed: ' + e.message }
       await this.ctx.storage.put('s', s)
@@ -82,6 +82,7 @@ export class Engine {
   async tick() {
     const s = await this.load(), now = Date.now(), env = this.env, notices: Notice[] = []
     s.lastTick = now
+    await this.refreshFx(s, now)
     const auto = String(env.PAIRS || 'EURUSD').split(',')[0].trim()
     const day = new Date(now).toISOString().slice(0, 10); if (s.credits.day !== day) s.credits = { day, n: 0 }
     if (!s.enabled) s.status = 'Paused'
@@ -94,7 +95,7 @@ export class Engine {
       else if (s.settings.tgNoTrade) await tg(env, noTradeMessage(n.pair, n.time, n.reasons))
     }
     const d = new Date(now), key = d.toISOString().slice(0, 13), hr = d.getUTCHours()
-    if (s.enabled && d.getUTCDay() >= 1 && d.getUTCDay() <= 5 && hr >= 9 && hr <= 17 && d.getUTCMinutes() < 10 && s.lastReport !== key) { s.lastReport = key; await tg(env, summaryText(s.cycles, s.binary, s.exness, now, s.settings.ghsPerUsd)) }
+    if (s.enabled && d.getUTCDay() >= 1 && d.getUTCDay() <= 5 && hr >= 9 && hr <= 17 && d.getUTCMinutes() < 10 && s.lastReport !== key) { s.lastReport = key; await tg(env, summaryText(s.cycles, s.binary, s.exness, now, rateOf(s))) }
     await this.ctx.storage.put('s', s)
   }
   private async run(s: EngineState, auto: string, now: number, notices: Notice[]) {
@@ -129,6 +130,15 @@ export class Engine {
     const pausedNote = !copyOk && (copyPairs.length || s.copy.feeds.length) ? ' Copy-trade price checks are paused to protect the auto trader data credits.' : ''
     s.status = pausedNote + (!seeded ? 'Loaded history. Trading starts at the next 15-minute open inside 08:00-17:00 GMT.' : inSession ? `Live: ${auto}, deciding at every 15-minute open until 16:45 GMT.` : 'Market session closed (08:00-17:00 GMT, Mon-Fri). Auto trading sleeps and uses no data credits.')
     s.status = s.status.trim()
+  }
+  /** Live GH₵ per USD from open.er-api.com (free, no key, updates daily). Refreshed every 6 hours; if it fails, the last good rate is kept and it retries in 30 minutes. */
+  private async refreshFx(s: EngineState, now: number) {
+    if (s.fx && now - (s.fx.tried ?? s.fx.at) < (s.fx.error ? 30 * 60000 : 6 * 3600000)) return
+    try {
+      const j: any = await (await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(6000) })).json(), r = Number(j?.rates?.GHS)
+      if (!(r > 1 && r < 1000)) throw new Error(String(j?.['error-type'] ?? 'no GHS rate in the answer'))
+      s.fx = { rate: r, at: now, tried: now, src: 'open.er-api.com' }
+    } catch (e: any) { s.fx = { rate: s.fx?.rate ?? s.settings.ghsPerUsd, at: s.fx?.at ?? 0, tried: now, src: s.fx?.src ?? 'fallback', error: e.message } }
   }
   /** Copy trades may only use credits left over after the auto trader's own needs for the rest of today's session. */
   private copyOk(s: EngineState, now: number) {

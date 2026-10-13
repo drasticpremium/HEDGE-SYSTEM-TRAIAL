@@ -39,7 +39,7 @@ export function PerformancePage() {
       <section className="panel card"><h2>Binary account</h2><EquityChart height={140} series={[{ name: 'Binary P&L', color: 'var(--ok)', values: bin }]} /></section>
       <section className="panel card"><h2>Exness account</h2><EquityChart height={140} series={[{ name: 'Exness P&L after costs', color: 'var(--bad)', values: exn }]} /></section>
       <section className="panel card wide"><h2>P&L by pair</h2>
-        {!rows.length ? <p className="empty">No cycles in this range yet.</p> : <table className="log-table"><thead><tr><th>Pair</th><th>Cycles</th><th>Win rate</th><th>Net</th></tr></thead><tbody>{group(rows, (r) => r.pair).map(([k, g]) => <tr key={k}><td>{k}</td><td>{g.n}</td><td>{pct(g.wins / g.n)}</td><td className={g.net >= 0 ? 'up' : 'down'}>{m(g.net)}</td></tr>)}</tbody></table>}</section>
+        {!rows.length ? <p className="empty">No cycles in this range yet.</p> : <div className="table-scroll"><table className="log-table"><thead><tr><th>Pair</th><th>Cycles</th><th>Win rate</th><th>Net</th></tr></thead><tbody>{group(rows, (r) => r.pair).map(([k, g]) => <tr key={k}><td>{k}</td><td>{g.n}</td><td>{pct(g.wins / g.n)}</td><td className={g.net >= 0 ? 'up' : 'down'}>{m(g.net)}</td></tr>)}</tbody></table></div>}</section>
     </div>
   )
 }

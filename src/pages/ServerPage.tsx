@@ -39,7 +39,7 @@ export function ServerPage() {
         {msg && <p>{msg}</p>}</section>
       <section className="panel card wide"><h2>Closed cycles</h2>
         {!data.cycles.length ? <p className="empty">No closed cycles yet. The server trades only inside 08:00-17:00 GMT, Mon-Fri.</p> :
-          <table className="log-table"><thead><tr><th>Time (GMT)</th><th>Pair</th><th>Dir</th><th>Quotex</th><th>Exness</th><th>Net</th><th>Outcome</th></tr></thead><tbody>{data.cycles.slice(0, 30).map((r) => <tr key={r.id}><td>{r.time.slice(0, 19).replace('T', ' ')}</td><td>{r.pair}</td><td>{r.direction}</td><td className={(r.binaryPnl ?? 0) + (r.counterPnl ?? 0) >= 0 ? 'up' : 'down'}>{m((r.binaryPnl ?? 0) + (r.counterPnl ?? 0))}</td><td className={(r.exnessPnl ?? 0) >= 0 ? 'up' : 'down'}>{m(r.exnessPnl ?? 0)}</td><td className={r.netPnl >= 0 ? 'up' : 'down'}>{m(r.netPnl)}</td><td>{r.outcomeTag}</td></tr>)}</tbody></table>}</section>
+          <div className="table-scroll"><table className="log-table"><thead><tr><th>Time (GMT)</th><th>Pair</th><th>Dir</th><th>Quotex</th><th>Exness</th><th>Net</th><th>Outcome</th></tr></thead><tbody>{data.cycles.slice(0, 30).map((r) => <tr key={r.id}><td>{r.time.slice(0, 19).replace('T', ' ')}</td><td>{r.pair}</td><td>{r.direction}</td><td className={(r.binaryPnl ?? 0) + (r.counterPnl ?? 0) >= 0 ? 'up' : 'down'}>{m((r.binaryPnl ?? 0) + (r.counterPnl ?? 0))}</td><td className={(r.exnessPnl ?? 0) >= 0 ? 'up' : 'down'}>{m(r.exnessPnl ?? 0)}</td><td className={r.netPnl >= 0 ? 'up' : 'down'}>{m(r.netPnl)}</td><td>{r.outcomeTag}</td></tr>)}</tbody></table></div>}</section>
       <section className="wide"><h2>Server signals</h2><SignalCards rows={data.signals} /></section>
     </div>
   )

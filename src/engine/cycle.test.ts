@@ -13,7 +13,8 @@ for (const dir of ['CALL', 'PUT'] as Dir[]) describe(`cycle state machine (${dir
   it('stop hit, never returns, binary wins = +37.70', () => expect(run(dir, [1.1005], 1.1005).net).toBe(37.7))
   it('stop, counter above entry, outside band = -12.30', () => expect(run(dir, [1.1005, 1.10004], 1.101).net).toBe(-12.3))
   it('stop, counter, ends inside band (both win) = +85.20', () => expect(run(dir, [1.1005, 1.10004], 1.10002).net).toBe(85.2))
-  it('price below entry before counter: no counter, binary loses = -59.80', () => expect(run(dir, [1.1005, 1.0999], 1.0999).net).toBe(-59.8))
+  it('price already below entry when the window opens: no counter, binary loses = -59.80', () => { const c = mk(dir), f = (p: number) => (dir === 'CALL' ? p : 2.2 - p); step(c, f(1.1005), 100000); step(c, f(1.0999), 200000); step(c, f(1.0999), 700000); expect(c.counterState).toBe('cancelled'); expect(step(c, f(1.0999), 900000).settled!.net).toBe(-59.8) })
+  it('price jumps through the trigger inside the window: counter fills at entry +0.5 pip', () => { const c = mk(dir), f = (p: number) => (dir === 'CALL' ? p : 2.2 - p); step(c, f(1.1005), 650000); step(c, f(1.0999), 700000); expect(c.counterState).toBe('open'); expect(c.counterEntry).toBeCloseTo(f(1.10005), 8) })
   it('no counter with under 1 minute left', () => {
     const c = mk(dir), f = (p: number) => (dir === 'CALL' ? p : 2.2 - p)
     step(c, f(1.1005), 700000); step(c, f(1.10004), 850000)

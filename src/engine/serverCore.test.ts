@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { newState, decide, processCandle, setCapital, clearAuto, signalMessage, cycleMessage, summaryText, infoMessage, nextLadder, previewNotices, type EngineState } from './serverCore'
+import { newState, decide, processCandle, setCapital, clearAuto, signalMessage, cycleMessage, summaryText, infoMessage, nextLadder, previewNotices, plan, rateOf, type EngineState } from './serverCore'
 const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random())
 /** Real-data stand-in: a long random walk, fed the same way the server feeds real candles (M1 closes, M15/H1 built from them, decision at each 15-minute open). */
 function run(days: number, start = 250) {
@@ -75,4 +75,27 @@ describe('heads-up before an open', () => {
     const off = mk(ready({ minStrength: 0, headsUp: false })); expect(previewNotices(off, 'EURUSD', open, 2)).toEqual([])
   })
   it('a second message reports cancelled when conditions disappear', () => { const s = mk(ready({ minStrength: 0 })); previewNotices(s, 'EURUSD', open, 2); s.settings.minStrength = 101; const second = previewNotices(s, 'EURUSD', open, 1); if (s.heads?.dir === null && second.length) expect((second[0] as { text: string }).text).toContain('CANCELLED') })
+})
+
+describe('hedge stop is always below what the binary pays', () => {
+  it('stop money + commission never exceeds the chosen share of the lowest binary win', () => {
+    for (const stake of [1, 2, 5, 10, 25, 50, 200]) for (const pm of [91, 95]) for (const cap of [50, 80, 100]) {
+      const s = ready({ stakeUsd: stake, payoutMin: pm, payoutMax: 95, hedgeCapPct: cap }); setCapital(s, 500000, 500000)
+      const p = plan(s, 'EURUSD', 1.115, { step: 0 }), stopMoney = p.stopPips * p.lots * p.pv, cost = p.lots * s.settings.commission
+      if (p.lots > 0.01) expect(stopMoney + cost).toBeLessThanOrEqual((cap / 100) * stake * (pm / 100) + 1e-6)   // at the broker's 0.01 minimum lot nothing smaller is possible
+    }
+  })
+  it("a stop-hit cycle where the binary wins can never lose money (today's problem)", () => {
+    for (const stake of [2, 5, 10]) { const s = ready({ stakeUsd: stake, hedgeCapPct: 80 }); setCapital(s, 500000, 500000); const p = plan(s, 'EURUSD', 1.115, { step: 0 }), net = stake * 0.91 - p.stopPips * p.lots * p.pv - p.lots * s.settings.commission; expect(net).toBeGreaterThan(0) }
+  })
+  it('big stakes keep the full $8 stop and $15 take profit (the cap only bites when the stake is small)', () => { const s = ready({ stakeUsd: 200 }); setCapital(s, 500000, 500000); const p = plan(s, 'EURUSD', 1.115, { step: 0 }); expect(p.lots).toBeLessThanOrEqual(0.2); expect(p.stopPips * p.lots * p.pv).toBeCloseTo(8, 0); expect(p.tpPips * p.lots * p.pv).toBeCloseTo(15, 0) })
+  it('the setting is validated', () => { expect(plan(ready({ hedgeCapPct: 50 }), 'EURUSD', 1.115, { step: 0 }).lots).toBeLessThanOrEqual(plan(ready({ hedgeCapPct: 100 }), 'EURUSD', 1.115, { step: 0 }).lots) })
+})
+describe('live GH₵ rate', () => {
+  it('uses a fresh live rate, ignores a stale or broken one, and capital follows it', () => {
+    const s = newState(), now = Date.now(); expect(rateOf(s, now)).toBe(11)
+    s.fx = { rate: 14.9, at: now - 3600000, src: 'x' }; expect(rateOf(s, now)).toBe(14.9)
+    s.fx = { rate: 14.9, at: now - 49 * 3600000, src: 'x' }; expect(rateOf(s, now)).toBe(11); s.fx = { rate: NaN, at: now, src: 'x' }; expect(rateOf(s, now)).toBe(11)
+    s.fx = { rate: 15, at: Date.now(), src: 'x' }; setCapital(s, 1500, 750); expect(s.binary).toBeCloseTo(100, 6); expect(s.exness).toBeCloseTo(50, 6)
+  })
 })
