@@ -4,11 +4,11 @@ import type { CycleLogRow, SignalRow } from '../db/db'
 import type { Cycle } from '../engine/cycle'
 import { toast } from './notify'
 import { useAppStore } from './useAppStore'
-import type { Settings } from '../engine/serverCore'
+import type { Settings, Pending } from '../engine/serverCore'
 import type { CopyTrade, Feed, FeedEvent } from '../engine/copyCore'
 export interface ServerView {
   rate: number; fx: { rate: number; at: number; src: string; error?: string } | null; telegram: boolean; now: number; enabled: boolean; news: boolean; status: string; lastTick: number; credits: { day: string; n: number }; binary: number; exness: number; capital: { binary: number; exness: number }; settings: Settings
-  ladder?: number; cycle: Cycle | null; prices: Record<string, number>; cycles: CycleLogRow[]; signals: SignalRow[]; candles: Record<string, Candle[]>; copy: { balance: number; start: number; trades: CopyTrade[]; feeds: Feed[]; log: FeedEvent[] }; testResult?: string
+  ladder?: number; pending?: Pending | null; cycle: Cycle | null; prices: Record<string, number>; cycles: CycleLogRow[]; signals: SignalRow[]; candles: Record<string, Candle[]>; copy: { balance: number; start: number; trades: CopyTrade[]; feeds: Feed[]; log: FeedEvent[] }; testResult?: string
 }
 interface S { data: ServerView | null; error: string; load: () => Promise<void>; control: (body: object, token?: string) => Promise<string> }
 export const useServer = create<S>((set) => ({

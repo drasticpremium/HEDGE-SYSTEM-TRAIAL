@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { newState, decide, processCandle, setCapital, clearAuto, signalMessage, cycleMessage, summaryText, infoMessage, nextLadder, previewNotices, plan, rateOf, type EngineState } from './serverCore'
+import { newState, decide, processCandle, setCapital, clearAuto, signalMessage, cycleMessage, summaryText, infoMessage, nextLadder, previewNotices, plan, rateOf, settleExpired, cancelPending, setupMessage, validateSettings, type EngineState } from './serverCore'
 const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random())
 /** Real-data stand-in: a long random walk, fed the same way the server feeds real candles (M1 closes, M15/H1 built from them, decision at each 15-minute open). */
 function run(days: number, start = 250) {
@@ -54,10 +54,10 @@ describe('recovery ladder', () => {
     const lose = (rec: number, drop: number) => { const s = ready({ minStrength: 0 }); s.ladder = 1; decide(s, 'EURUSD', 2e12, 1.115); const c = s.cycle!; c.rec = rec; if (rec > 0) s.ladderDir = c.dir; for (let i = 0; i < 15; i++) { const px = c.entry + (c.dir === 'CALL' ? -1 : 1) * drop * 0.0001 * (i / 14); processCandle(s, 'EURUSD', { t: c.openT + i * 60000, o: px, h: px + 0.00001, l: px - 0.00001, c: px }) } return { s, dir: c.dir } }
     const a = lose(0, 3); expect(a.s.ladderDir).toBe(a.dir); const b = lose(1, 3); expect(b.s.ladderDir).toBe(b.dir); expect(lose(2, 3).s.ladderDir).toBeNull(); expect(lose(1, -3).s.ladderDir).toBeNull()
   })
-  it('the third trade doubles both stake and lots (and the money stop and take profit)', () => {
+  it('the third trade doubles stake and lots (to the nearest 0.01 lot) and the money stop and take profit', () => {
     const b = ready(); b.ladder = 1; decide(b, 'EURUSD', 2e12, 1.115); const c = ready(); c.ladder = 2; decide(c, 'EURUSD', 2e12, 1.115)
-    expect(c.cycle!.rec).toBe(2); expect(c.cycle!.stake).toBe(10); expect(c.cycle!.lots).toBeCloseTo(b.cycle!.lots * 2, 6)
-    expect(c.signals[0].stopUsd!).toBeCloseTo(b.signals[0].stopUsd! * 2, 1); expect(c.signals[0].tpUsd!).toBeCloseTo(b.signals[0].tpUsd! * 2, 1)
+    expect(c.cycle!.rec).toBe(2); expect(c.cycle!.stake).toBe(10); expect(Math.abs(c.cycle!.lots - b.cycle!.lots * 2)).toBeLessThanOrEqual(0.011)
+    expect(c.signals[0].stopUsd! / b.signals[0].stopUsd!).toBeGreaterThan(1.6); expect(c.signals[0].tpUsd! / b.signals[0].tpUsd!).toBeGreaterThan(1.6)
   })
   it('a losing binary queues the next recovery, a loss on step 2 halts, a win resets', () => {
     const run = (rec: number, drop: number) => { const s = ready({ minStrength: 0 }); s.ladder = 1; decide(s, 'EURUSD', 2e12, 1.115); const c = s.cycle!; c.rec = rec; const start = c.openT
@@ -77,19 +77,31 @@ describe('heads-up before an open', () => {
   it('a second message reports cancelled when conditions disappear', () => { const s = mk(ready({ minStrength: 0 })); previewNotices(s, 'EURUSD', open, 2); s.settings.minStrength = 101; const second = previewNotices(s, 'EURUSD', open, 1); if (s.heads?.dir === null && second.length) expect((second[0] as { text: string }).text).toContain('CANCELLED') })
 })
 
-describe('hedge stop is always below what the binary pays', () => {
-  it('stop money + commission never exceeds the chosen share of the lowest binary win', () => {
-    for (const stake of [1, 2, 5, 10, 25, 50, 200]) for (const pm of [91, 95]) for (const cap of [50, 80, 100]) {
-      const s = ready({ stakeUsd: stake, payoutMin: pm, payoutMax: 95, hedgeCapPct: cap }); setCapital(s, 500000, 500000)
-      const p = plan(s, 'EURUSD', 1.115, { step: 0 }), stopMoney = p.stopPips * p.lots * p.pv, cost = p.lots * s.settings.commission
-      if (p.lots > 0.01) expect(stopMoney + cost).toBeLessThanOrEqual((cap / 100) * stake * (pm / 100) + 1e-6)   // at the broker's 0.01 minimum lot nothing smaller is possible
+describe('Exness hedge sizing: stop at most $4, a stop-hit still leaves a profit, take profit $15', () => {
+  const sized = (over: Partial<EngineState['settings']> = {}, step = 0) => { const s = ready({ ...over }); setCapital(s, 500000, 500000); const p = plan(s, 'EURUSD', 1.115, { step }); return { s, p, stop: p.stopPips * p.lots * p.pv, tp: p.tpPips * p.lots * p.pv, cost: p.lots * s.settings.commission } }
+  it('the stop never costs more than $4', () => { for (const stake of [1, 2, 5, 10, 25, 50, 200]) { const { stop } = sized({ stakeUsd: stake }); expect(stop).toBeLessThanOrEqual(4 + 1e-6) } })
+  it('when the stop hits and the binary wins, at least the chosen profit is kept (down to the 0.01 lot minimum)', () => {
+    for (const stake of [3, 5, 10, 25, 50]) for (const pm of [91, 95]) for (const keep of [0.5, 1.5, 3]) {
+      const { p, stop, cost, s } = sized({ stakeUsd: stake, payoutMin: pm, payoutMax: 95, minNetWin: keep }); const net = stake * (pm / 100) - stop - cost
+      if (p.lots > 0.01) expect(net).toBeGreaterThanOrEqual(keep - 1e-6); expect(net).toBeGreaterThan(0); void s
     }
   })
-  it("a stop-hit cycle where the binary wins can never lose money (today's problem)", () => {
-    for (const stake of [2, 5, 10]) { const s = ready({ stakeUsd: stake, hedgeCapPct: 80 }); setCapital(s, 500000, 500000); const p = plan(s, 'EURUSD', 1.115, { step: 0 }), net = stake * 0.91 - p.stopPips * p.lots * p.pv - p.lots * s.settings.commission; expect(net).toBeGreaterThan(0) }
+  it("a $5 stake with the defaults: stop about $2-3, profit kept about $1.5, take profit $15 (today's problem fixed)", () => {
+    const { stop, tp, cost, p } = sized({}); expect(stop).toBeLessThanOrEqual(4); expect(5 * 0.91 - stop - cost).toBeGreaterThanOrEqual(1.5 - 1e-6); expect(tp).toBeCloseTo(15, 0); expect(p.lots).toBeGreaterThanOrEqual(0.01)
   })
-  it('big stakes keep the full $8 stop and $15 take profit (the cap only bites when the stake is small)', () => { const s = ready({ stakeUsd: 200 }); setCapital(s, 500000, 500000); const p = plan(s, 'EURUSD', 1.115, { step: 0 }); expect(p.lots).toBeLessThanOrEqual(0.2); expect(p.stopPips * p.lots * p.pv).toBeCloseTo(8, 0); expect(p.tpPips * p.lots * p.pv).toBeCloseTo(15, 0) })
-  it('the setting is validated', () => { expect(plan(ready({ hedgeCapPct: 50 }), 'EURUSD', 1.115, { step: 0 }).lots).toBeLessThanOrEqual(plan(ready({ hedgeCapPct: 100 }), 'EURUSD', 1.115, { step: 0 }).lots) })
+  it('a big stake is limited only by the $4 budget and the lot maximum, and the stop distance follows volatility', () => { const { stop, p } = sized({ stakeUsd: 200 }); expect(stop).toBeGreaterThan(2.5); expect(stop).toBeLessThanOrEqual(4); expect(p.stopPips).toBeGreaterThanOrEqual(1.5); expect(sized({ stakeUsd: 200, maxLots: 5 }).stop).toBeGreaterThan(3.5) })
+  it('asking to keep more profit makes the hedge smaller, never bigger', () => { expect(sized({ minNetWin: 3 }).p.lots).toBeLessThanOrEqual(sized({ minNetWin: 0.5 }).p.lots) })
+  it('recovery step 2 doubles stake, lots and every money figure', () => { const a = sized({}, 0), b = sized({ recoveryOn: true }, 2); expect(b.p.stake).toBe(10); expect(Math.abs(b.p.lots - 2 * a.p.lots)).toBeLessThanOrEqual(0.011); expect(b.stop / a.stop).toBeGreaterThan(1.6); expect(b.stop / a.stop).toBeLessThan(2.4) })
+})
+describe('settling, resets and defaults', () => {
+  it('Telegram no-trade and heads-up messages are off by default', () => { const d = newState().settings; expect([d.tgNoTrade, d.headsUp, d.recoveryOn, d.stopUsd, d.tpUsd]).toEqual([false, false, false, 4, 15]) })
+  it('a cycle ending exactly at an open is settled first, so the new candle can be traded', () => {
+    const s = ready({ minStrength: 0, recoveryOn: true }); s.ladder = 1; decide(s, 'EURUSD', 2e12, 1.115); const c = s.cycle!, before = s.binary
+    expect(settleExpired(s, c.entry - (c.dir === 'CALL' ? 1 : -1) * 0.0003, c.expiryT - 1000)).toEqual([]); expect(s.cycle).not.toBeNull()          // not over yet
+    const out = settleExpired(s, c.entry + (c.dir === 'CALL' ? 1 : -1) * 0.0001, c.expiryT + 2000); expect(s.cycle).toBeNull(); expect(s.cycles.length).toBe(1); expect(out.some((n) => n.kind === 'cycle')).toBe(true); expect(s.binary).not.toBe(before)
+    expect(decide(s, 'EURUSD', c.expiryT, 1.115).some((n) => n.kind === 'notrade' && n.reasons.includes('Previous cycle still open'))).toBe(false)
+  })
+  it('a reset waits for the next open instead of re-deciding the current candle late', () => { const s = ready(); s.lastDecision = 0; const now = Date.UTC(2026, 9, 13, 8, 54); clearAuto(s, now); expect(s.lastDecision).toBe(Date.UTC(2026, 9, 13, 8, 45)); expect(s.cycle).toBeNull(); clearAuto(s); expect(s.lastDecision).toBe(0) })
 })
 describe('live GH₵ rate', () => {
   it('uses a fresh live rate, ignores a stale or broken one, and capital follows it', () => {
@@ -97,5 +109,68 @@ describe('live GH₵ rate', () => {
     s.fx = { rate: 14.9, at: now - 3600000, src: 'x' }; expect(rateOf(s, now)).toBe(14.9)
     s.fx = { rate: 14.9, at: now - 49 * 3600000, src: 'x' }; expect(rateOf(s, now)).toBe(11); s.fx = { rate: NaN, at: now, src: 'x' }; expect(rateOf(s, now)).toBe(11)
     s.fx = { rate: 15, at: Date.now(), src: 'x' }; setCapital(s, 1500, 750); expect(s.binary).toBeCloseTo(100, 6); expect(s.exness).toBeCloseTo(50, 6)
+  })
+})
+
+const T0 = Date.UTC(2026, 9, 6, 8, 0), PRICE = 1.115
+/** A state whose signal is READY (clear uptrend, RSI mid-zone, normal range) so pullback setups can be tested without relying on luck. */
+const pbState = (over: Partial<EngineState['settings']> = {}, range = 0.0002) => {
+  const s = newState(); setCapital(s, 50000, 50000); Object.assign(s.settings, { minStrength: 0, pullbackOn: true, ...over })
+  s.h1.EURUSD = series(80, (i) => 1.08 + i * 0.0003, 3600000); let c = 1.1
+  s.m15.EURUSD = Array.from({ length: 60 }, (_, i) => { if (i) c += i % 2 ? 0.00012 : -0.00007; return { t: 1.7e12 + i * 900000, o: c, h: c + range, l: c - range, c } })
+  s.candles.EURUSD = series(60, (i) => 1.1 + i * 0.00001, 60000); return s
+}
+const m1 = (min: number, o: number, h: number, l: number, c: number) => ({ t: T0 + min * 60000, o, h, l, c })
+describe('hedge size follows the recent candle range (ATR)', () => {
+  it('wider recent candles give a wider stop and fewer lots, calmer candles a tighter stop and more lots, and the stop money stays within budget', () => {
+    const calm = plan(pbState({ pullbackOn: false }, 0.0002), 'EURUSD', PRICE, { step: 0 }), wild = plan(pbState({ pullbackOn: false }, 0.0007), 'EURUSD', PRICE, { step: 0 })
+    expect(wild.atr).toBeGreaterThan(calm.atr * 2); expect(wild.stopPips).toBeGreaterThan(calm.stopPips * 2); expect(calm.lots).toBeGreaterThanOrEqual(wild.lots)
+    for (const p of [calm, wild]) { expect(p.stopPips * p.lots * p.pv).toBeLessThanOrEqual(4 + 1e-6); expect(p.tpPips * p.lots * p.pv).toBeCloseTo(15, 0) }
+  })
+  it('the stop-distance multiplier setting scales the stop', () => { const a = plan(pbState({ pullbackOn: false, stopAtrMult: 0.7 }), 'EURUSD', PRICE, { step: 0 }), b = plan(pbState({ pullbackOn: false, stopAtrMult: 1.4 }), 'EURUSD', PRICE, { step: 0 }); expect(b.stopPips / a.stopPips).toBeGreaterThan(1.8); expect(b.stopPips / a.stopPips).toBeLessThan(2.2) })
+})
+describe('pullback entry', () => {
+  it('off: the trade is taken at the open as before', () => { const s = pbState({ pullbackOn: false }); decide(s, 'EURUSD', T0, PRICE); expect(s.cycle).not.toBeNull(); expect(s.pending).toBeNull() })
+  it('on: nothing is entered at the open, a setup waits at 20% of the range below (CALL) with a skip level above', () => {
+    const s = pbState(), out = decide(s, 'EURUSD', T0, PRICE), pd = s.pending!
+    expect(s.cycle).toBeNull(); expect(pd.dir).toBe('CALL'); expect(pd.ref).toBe(PRICE); expect(pd.pips).toBeCloseTo((plan(s, 'EURUSD', PRICE, { step: 0, ignoreOpen: true }).atr * 20) / 100, 1)
+    expect(pd.ref - pd.entryLevel).toBeCloseTo(pd.skipLevel - pd.ref, 8); expect(pd.entryLevel).toBeLessThan(PRICE); expect(pd.until).toBe(T0 + 8 * 60000)
+    const msg = out.filter((n) => n.kind === 'info').map((n) => (n as { text: string }).text).join(); expect(msg).toContain('SETUP'); expect(msg).toContain('Do NOT enter at the open'); expect(msg).toContain(pd.entryLevel.toFixed(5)); expect(setupMessage(pd)).toContain('Skip if price rises')
+  })
+  it('CALL: price pulls back to the level, the trade is taken THERE, expires with the candle, hedge is opposite, prices follow the entry', () => {
+    const s = pbState(); decide(s, 'EURUSD', T0, PRICE); const pd = s.pending!, d = PRICE - pd.entryLevel
+    const out = processCandle(s, 'EURUSD', m1(3, PRICE, PRICE + d * 0.3, pd.entryLevel - d * 0.1, pd.entryLevel))   // open, up a little (below skip), then down through the entry level
+    const c = s.cycle!; expect(c).not.toBeNull(); expect(s.pending).toBeNull(); expect(c.entry).toBeCloseTo(pd.entryLevel, 8); expect(c.expiryT).toBe(T0 + 15 * 60000); expect(c.dir).toBe('CALL')
+    const row = s.signals[0]; expect(row.kind).toBe('TRADE'); expect(row.hedgeSide).toBe('SELL'); expect(row.pullbackPips).toBe(pd.pips); expect(row.openRef).toBe(PRICE); expect(row.sl!).toBeGreaterThan(row.price); expect(row.tp!).toBeLessThan(row.price)
+    const msg = (out.find((n) => n.kind === 'signal') as { row: typeof row }).row; expect(signalMessage(msg)).toContain('PULLBACK ENTRY'); expect(signalMessage(msg)).toContain('Recent range (ATR)'); expect(signalMessage(msg)).toContain('to the candle end')
+    for (let m = 4; m < 15; m++) processCandle(s, 'EURUSD', m1(m, pd.entryLevel, pd.entryLevel + 0.00002, pd.entryLevel - 0.00001, pd.entryLevel + 0.00001))   // flat to the candle end: binary wins
+    expect(s.cycle).toBeNull(); expect(s.cycles.length).toBe(1); expect(s.cycles[0].binaryResult).toBe('WIN')
+  })
+  it('PUT mirrors it: waits ABOVE the open and sells there, hedge is BUY', () => {
+    const s = pbState(); decide(s, 'EURUSD', T0, PRICE); const base = s.pending!; s.pending = { ...base, dir: 'PUT', entryLevel: PRICE + (PRICE - base.entryLevel), skipLevel: PRICE - (PRICE - base.entryLevel) }
+    const d = s.pending.entryLevel - PRICE; processCandle(s, 'EURUSD', m1(2, PRICE, s.pending.entryLevel + d * 0.1, PRICE - d * 0.3, PRICE))   // c >= o path: o, l, h, c : low first (not past the skip), then up through the entry level
+    expect(s.cycle?.dir).toBe('PUT'); expect(s.cycle!.entry).toBeCloseTo(PRICE + d, 8); expect(s.signals[0].hedgeSide).toBe('BUY'); expect(s.signals[0].sl!).toBeLessThan(s.signals[0].price)
+  })
+  it('price runs straight in favour first: the candle is skipped for BOTH Quotex and Exness', () => {
+    const s = pbState(); decide(s, 'EURUSD', T0, PRICE); const pd = s.pending!, d = PRICE - pd.entryLevel
+    const out = processCandle(s, 'EURUSD', m1(1, PRICE, pd.skipLevel + d * 0.2, pd.entryLevel - d * 0.2, PRICE - d * 0.5))   // c < o path: o, h, l, c : the skip level is touched BEFORE the pullback level
+    expect(s.cycle).toBeNull(); expect(s.pending).toBeNull(); expect(s.cycles.length).toBe(0); expect(s.signals[0].kind).toBe('NO_TRADE'); expect(s.signals[0].reasons[0]).toContain('straight in favour')
+    expect((out.find((n) => n.kind === 'info') as { text: string }).text).toContain('SETUP CANCELLED')
+    const after = processCandle(s, 'EURUSD', m1(2, PRICE, PRICE, pd.entryLevel - d, pd.entryLevel - d)); expect(after.some((n) => n.kind === 'signal')).toBe(false); expect(s.cycle).toBeNull()   // a later dip does not revive it
+  })
+  it('no pullback within the window: skipped', () => {
+    const s = pbState({ pullbackWindowMin: 5 }); decide(s, 'EURUSD', T0, PRICE); const pd = s.pending!
+    processCandle(s, 'EURUSD', m1(1, PRICE, PRICE + 0.00001, PRICE - 0.00001, PRICE)); expect(s.pending).not.toBeNull()
+    processCandle(s, 'EURUSD', m1(5, PRICE, PRICE + 0.00001, PRICE - 0.00001, PRICE)); expect(s.pending).toBeNull(); expect(s.signals[0].reasons[0]).toContain('No pullback came in time'); expect(s.cycle).toBeNull(); void pd
+  })
+  it('recovery trades are never delayed or skipped by the pullback rule', () => { const s = pbState({ recoveryOn: true }); s.ladder = 1; decide(s, 'EURUSD', T0, PRICE); expect(s.cycle?.rec).toBe(1); expect(s.pending).toBeNull(); expect(s.cycle!.entry).toBe(PRICE) })
+  it('a new open drops an old waiting setup; a reset clears it; cancelling twice is harmless', () => {
+    const s = pbState(); decide(s, 'EURUSD', T0, PRICE); expect(s.pending).not.toBeNull(); s.settings.pullbackOn = false; decide(s, 'EURUSD', T0 + 900000, PRICE); expect(s.pending).toBeNull()
+    const t = pbState(); decide(t, 'EURUSD', T0, PRICE); clearAuto(t, T0); expect(t.pending).toBeNull(); expect(cancelPending(t, 'x', 'y')).toEqual([])
+  })
+  it('candles from before the open never trigger the setup', () => { const s = pbState(); decide(s, 'EURUSD', T0, PRICE); const pd = s.pending!; processCandle(s, 'EURUSD', { t: T0 - 60000, o: PRICE, h: PRICE, l: pd.entryLevel - 0.001, c: pd.entryLevel }); expect(s.cycle).toBeNull(); expect(s.pending).not.toBeNull() })
+  it('the pullback button setting cannot be changed through the settings form; the percentages are range-checked', () => {
+    const cur = newState().settings; expect(validateSettings({ pullbackOn: true, pullbackPct: 25 }, cur)).toEqual({ ok: true, values: { pullbackPct: 25 } })
+    for (const bad of [{ pullbackPct: 0 }, { pullbackPct: 500 }, { pullbackWindowMin: 0 }, { stopAtrMult: 10 }]) expect(validateSettings(bad, cur).ok).toBe(false)
   })
 })

@@ -34,6 +34,8 @@ export function DeskPage() {
       <section className="panel card"><h2>{t ? 'Why this signal' : 'Why no trade'}</h2>
         {t ? <ul className="checks"><li className="ok">✔ Strength {t.strength}/100</li><li className="ok">✔ H1 trend, M15 slope, RSI and volatility agree</li><li className="ok">✔ Session open, no news switch, balance and margin fine</li></ul>
           : last?.kind === 'NO_TRADE' ? <ul className="checks">{last.reasons.map((r) => <li key={r} className="no">✖ {r}</li>)}</ul> : <p className="empty">Waiting for the first decision.</p>}</section>
+      {d.pending && d.pending.pair === pair && !t && <section className="panel card wide"><h2>⏳ Waiting for the pullback</h2><p className="big"><Pill side={d.pending.dir === 'CALL' ? 'BUY' : 'SELL'} /> <small className="mut">planned, do NOT enter at the open ({f(d.pending.ref)})</small></p>
+        <p>Enter when price {d.pending.dir === 'CALL' ? 'falls' : 'rises'} to <strong>{f(d.pending.entryLevel)}</strong> ({d.pending.pips} pips pullback). Skip if price {d.pending.dir === 'CALL' ? 'rises' : 'falls'} to <strong>{f(d.pending.skipLevel)}</strong> first. Waiting until {hms(d.pending.until).slice(0, 5)} GMT ({cd(d.pending.until - now)} left). Quotex and Exness are entered together at that price.</p></section>}
       <section className="panel card block quotex"><h2>Quotex (binary)</h2>
         {!t ? <p className="empty">No active signal. A ticket appears here at the open of a 15-minute candle when conditions are right.</p> : <>
           <p className="big"><Pill side={t.dir === 'CALL' ? 'BUY' : 'SELL'} /> <small className="mut">{t.dir}</small></p>
@@ -44,7 +46,7 @@ export function DeskPage() {
         {!t ? <p className="empty">The hedge ticket appears together with the binary.</p> : <>
           <p className="big"><Pill side={exSide!} /> {t.lots!.toFixed(2)} lots</p><p>Entry at market about {f(t.price)}</p>
           <p>Stop loss <strong>{f(t.sl!)}</strong> ({t.stopPips} pips, -${t.stopUsd?.toFixed(2)})</p><p>Take profit <strong>{f(t.tp!)}</strong> ({t.tpPips} pips, +${t.tpUsd?.toFixed(2)})</p>
-          <p>Close any open hedge at expiry {hms(Date.parse(t.expiry!))} GMT.{t.scaled !== undefined && t.scaled < 1 ? ` Hedge scaled to ${(t.scaled * 100).toFixed(0)}% of plan to fit the Exness balance.` : ''}</p>
+          <p>Close any open hedge at expiry {hms(Date.parse(t.expiry!))} GMT.{t.scaled !== undefined && t.scaled < 0.95 ? ` Hedge sized to ${(t.scaled * 100).toFixed(0)}% of the stop budget, so a stop-hit still leaves a profit from the binary.` : ''}</p>
           <button type="button" className="btn" onClick={() => copy('e', `Exness: ${exSide} ${pair} ${t.lots!.toFixed(2)} lots SL ${f(t.sl!)} TP ${f(t.tp!)}`)}>{copied === 'e' ? 'Copied' : 'Copy Exness ticket'}</button></>}</section>
       {t && <section className="panel card wide"><h2>Going in my favour (model estimate)</h2>
         <div className="kpis"><div className="kpi"><span>Chance the binary finishes in the money</span><strong>{(winProbability(fav, Math.max(1, t.vol), left) * 100).toFixed(0)}%</strong></div>
@@ -53,7 +55,7 @@ export function DeskPage() {
           <div className="kpi"><span>Combined (estimate)</span><strong className={qUsd + exUsd >= 0 ? 'up' : 'down'}>{qUsd + exUsd >= 0 ? '+' : '-'}${Math.abs(qUsd + exUsd).toFixed(2)}</strong></div></div>
         <p className="mut">The percentage is a random-walk estimate, not a promise. Final results use the real price at expiry.</p></section>}
       <section className="panel card wide"><h2>{pair} chart (real market, 1-minute)</h2>
-        <TradeChart candles={m1} digits={dp} levels={t ? [{ price: t.price, label: 'Entry', color: '#5ea0ff' }, { price: t.sl!, label: 'Exness stop', color: '#ff6d7a' }, { price: t.tp!, label: 'Exness TP', color: '#2ecc8f' }, { price: t.price + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : []}
+        <TradeChart candles={m1} digits={dp} levels={t ? [{ price: t.price, label: 'Entry', color: '#5ea0ff' }, { price: t.sl!, label: 'Exness stop', color: '#ff6d7a' }, { price: t.tp!, label: 'Exness TP', color: '#2ecc8f' }, { price: t.price + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : d.pending && d.pending.pair === pair ? [{ price: d.pending.entryLevel, label: 'Pullback entry', color: '#5ea0ff' }, { price: d.pending.skipLevel, label: 'Skip level', color: '#ff6d7a' }] : []}
           box={t ? { t0: Date.parse(t.time), t1: Date.parse(t.expiry!), entry: t.price, sl: t.sl!, tp: t.tp!, slPips: t.stopPips!, tpPips: t.tpPips!, quotex: t.dir === 'CALL' ? 'BUY' : 'SELL' } : null} /></section>
       <section className="wide"><h2>Signal history</h2><p className="mut">Newest first. Green = tradable candle, red = a run of no-trade candles (shown once).</p><SignalCards rows={d.signals} /></section>
     </div>

@@ -29,7 +29,7 @@ export interface EventLogRow {
 
 export interface SignalRow {
   id?: number; time: string; pair: string; kind: 'TRADE' | 'NO_TRADE'; dir?: 'CALL' | 'PUT'; price: number; strength: number; vol: number
-  stake?: number; lots?: number; hedgeSide?: 'BUY' | 'SELL'; sl?: number; tp?: number; stopPips?: number; tpPips?: number; expiry?: string; stopUsd?: number; tpUsd?: number; scaled?: number; rec?: number; reasons: string[]; skipped: number
+  stake?: number; lots?: number; hedgeSide?: 'BUY' | 'SELL'; sl?: number; tp?: number; stopPips?: number; tpPips?: number; expiry?: string; stopUsd?: number; tpUsd?: number; scaled?: number; rec?: number; atr?: number; pullbackPips?: number; openRef?: number; reasons: string[]; skipped: number
 }
 
 class HedgeSignalDeskDatabase extends Dexie {

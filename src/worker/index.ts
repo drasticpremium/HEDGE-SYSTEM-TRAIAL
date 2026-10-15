@@ -1,5 +1,5 @@
 // Cloudflare Worker: serves the site and /api/*, and runs the 24/7 paper trader every minute (cron) inside a Durable Object.
-import { newState, decide, processCandle, previewNotices, isTradingSession, signalMessage, noTradeMessage, cycleMessage, summaryText, setCapital, clearAuto, validateSettings, defaultSettings, rateOf, type EngineState, type Notice } from '../engine/serverCore'
+import { newState, decide, processCandle, previewNotices, isTradingSession, signalMessage, noTradeMessage, cycleMessage, summaryText, setCapital, clearAuto, settleExpired, cancelPending, validateSettings, defaultSettings, rateOf, type EngineState, type Notice } from '../engine/serverCore'
 import { addCopy, newCopy, pnlUsd, processCopyCandle, type CopyInput } from '../engine/copyCore'
 import { parseChannelName, parseChannelHtml, toCopyInput } from '../engine/tgFeed'
 import { parseSignal } from '../engine/signalParser'
@@ -13,7 +13,7 @@ const sym = (p: string) => `${p.slice(0, 3)}/${p.slice(3)}`
 const series = (j: any, tf: number, now: number): Candle[] => (j.values ?? []).map((v: any) => ({ t: Date.parse(String(v.datetime).replace(' ', 'T') + 'Z'), o: +v.open, h: +v.high, l: +v.low, c: +v.close })).filter((c: Candle) => c.t + tf <= now + 1000)
 const view = (s: EngineState, env: any) => ({
   telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), now: Date.now(), enabled: s.enabled, news: s.news, status: s.status, lastTick: s.lastTick, credits: s.credits, binary: s.binary, exness: s.exness, capital: s.capital, settings: s.settings,
-  ladder: s.ladder ?? 0, fx: s.fx ?? null, rate: rateOf(s), cycle: s.cycle, prices: s.prices, cycles: s.cycles.slice(0, 100), signals: s.signals.slice(0, 80), candles: Object.fromEntries(Object.entries(s.candles).map(([k, v]) => [k, v.slice(-150)])), copy: { balance: s.copy.balance, start: s.copy.start, trades: s.copy.trades.slice(0, 80), feeds: s.copy.feeds, log: s.copy.log.slice(0, 40) },
+  ladder: s.ladder ?? 0, pending: s.pending ?? null, fx: s.fx ?? null, rate: rateOf(s), cycle: s.cycle, prices: s.prices, cycles: s.cycles.slice(0, 100), signals: s.signals.slice(0, 80), candles: Object.fromEntries(Object.entries(s.candles).map(([k, v]) => [k, v.slice(-150)])), copy: { balance: s.copy.balance, start: s.copy.start, trades: s.copy.trades.slice(0, 80), feeds: s.copy.feeds, log: s.copy.log.slice(0, 40) },
 })
 async function tg(env: any, text: string): Promise<string> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return 'Telegram secrets not set (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)'
@@ -25,6 +25,7 @@ export class Engine {
   private async load(): Promise<EngineState> { const s = (await this.ctx.storage.get('s')) as EngineState | undefined; if (!s || s.v !== 2) return newState()
     s.settings = { ...defaultSettings, ...s.settings }; s.ladder ??= 0
     if (s.ladderMode !== 2) { s.settings.recoveryOn = false; s.ladder = 0; s.ladderDir = null; s.ladderMode = 2 } // the ladder is now a manual button, off until you press it
+    if (s.sizingMode !== 3) { s.settings.stopUsd = Math.min(s.settings.stopUsd, 4); s.settings.tpUsd = 15; s.sizingMode = 3 } // new hedge sizing rules: stop at most $4, take profit $15
     s.copy.feeds ??= []; s.copy.log ??= []; return s }
   /** One Twelve Data call. Counts against a 780/day budget (free plan is 800). */
   private async td(s: EngineState, q: string): Promise<any> {
@@ -46,6 +47,7 @@ export class Engine {
         else if (b.action === 'resume') s.enabled = true
         else if (b.action === 'settings') { const v = validateSettings(b.settings, s.settings); if (!v.ok) throw new Error(v.error); Object.assign(s.settings, v.values); testResult = 'Settings saved' }
         else if (b.action === 'ladder') { s.settings.recoveryOn = !!b.on; if (!b.on) { s.ladder = 0; s.ladderDir = null }; testResult = b.on ? 'Recovery ladder is ON' : 'Recovery ladder is OFF' }
+        else if (b.action === 'pullback') { s.settings.pullbackOn = !!b.on; if (!b.on) s.pending = null; testResult = b.on ? 'Pullback entry is ON' : 'Pullback entry is OFF' }
         else if (b.action === 'feed_add') {
           const name = parseChannelName(String(b.url ?? ''))
           if (!name) throw new Error('Use a public channel link like https://t.me/channelname (private invite links cannot be read)')
@@ -61,7 +63,7 @@ export class Engine {
         } else if (b.action === 'feed_remove') { s.copy.feeds = s.copy.feeds.filter((f) => f.id !== b.id); testResult = 'Channel removed' }
         else if (b.action === 'feed_toggle') { const f = s.copy.feeds.find((x) => x.id === b.id); if (f) f.enabled = !!b.on; testResult = b.on ? 'Channel resumed' : 'Channel paused' }
         else if (b.action === 'capital') { setCapital(s, cap(b.binaryGhs), cap(b.exnessGhs)); testResult = 'Capital updated (history kept)' }
-        else if (b.action === 'reset') { if (b.binaryGhs !== undefined || b.exnessGhs !== undefined) setCapital(s, cap(b.binaryGhs), cap(b.exnessGhs)); clearAuto(s); testResult = 'Auto trader data cleared and accounts reset' }
+        else if (b.action === 'reset') { if (b.binaryGhs !== undefined || b.exnessGhs !== undefined) setCapital(s, cap(b.binaryGhs), cap(b.exnessGhs)); clearAuto(s, Date.now()); testResult = 'Auto trader data cleared and accounts reset. Trading resumes at the next 15-minute open.' }
         else if (b.action === 'telegram_test') testResult = (await tg(this.env, '✅ <b>Test message</b> from Hedge Signal Desk. Alerts are working. 🔵 BUY · 🔴 SELL')) || 'Telegram test message sent'
         else if (b.action === 'copy_add') {
           const t = b.trade as CopyInput
@@ -109,10 +111,13 @@ export class Engine {
       s.candles[auto] = await m1(auto, 120); s.prices[auto] = s.candles[auto].at(-1)?.c ?? 0
     } else if (inSession || s.cycle || copyPairs.includes(auto) || isTradingSession(now + 180000)) {
       for (const c of await m1(auto, 5)) notices.push(...processCandle(s, auto, c)) // settle anything that ended at this open BEFORE deciding
+      if (s.pending && now > s.pending.until + 120000) notices.push(...cancelPending(s, 'No pullback came in time', new Date(now).toISOString()))
+      if (s.cycle && now - s.cycle.expiryT > 5 * 60000) { notices.push({ kind: 'info', text: '⚠️ <b>Settled late</b>: the data feed lagged, so the last known price was used.' }); notices.push(...settleExpired(s, s.prices[auto] ?? s.cycle.entry, now)) }
       if (isTradingSession(t0) && t0 > s.lastDecision && now - t0 < 10 * 60000) {
         s.m15[auto] = series(await this.td(s, `time_series?symbol=${sym(auto)}&interval=15min&outputsize=60&timezone=UTC&order=asc`), 900000, now)
         if (now - (s.h1At[auto] ?? 0) > 55 * 60000) { s.h1[auto] = series(await this.td(s, `time_series?symbol=${sym(auto)}&interval=1h&outputsize=80&timezone=UTC&order=asc`), 3600000, now); s.h1At[auto] = now }
         const price = Number((await this.td(s, `price?symbol=${sym(auto)}`)).price)
+        notices.push(...settleExpired(s, price, now)) // a cycle ending exactly at this open is closed first, so this candle can be traded
         s.lastDecision = t0; notices.push(...decide(s, auto, t0, price))
       }
     }
