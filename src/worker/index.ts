@@ -110,6 +110,7 @@ export class Engine {
       s.h1[auto] = series(await this.td(s, `time_series?symbol=${sym(auto)}&interval=1h&outputsize=80&timezone=UTC&order=asc`), 3600000, now); s.h1At[auto] = now
       s.candles[auto] = await m1(auto, 120); s.prices[auto] = s.candles[auto].at(-1)?.c ?? 0
     } else if (inSession || s.cycle || copyPairs.includes(auto) || isTradingSession(now + 180000)) {
+      if (!s.cycle && !s.pending && (s.candles[auto]?.[s.candles[auto].length - 1]?.t ?? 0) < now - 25 * 60000 && (inSession || isTradingSession(now + 180000))) { s.candles[auto] = await m1(auto, 120); s.prices[auto] = s.candles[auto][s.candles[auto].length - 1]?.c ?? s.prices[auto] } // after the overnight break, reload the last 2 hours: no gap on the chart or in the ranges
       for (const c of await m1(auto, 5)) notices.push(...processCandle(s, auto, c)) // settle anything that ended at this open BEFORE deciding
       if (s.pending && now > s.pending.until + 120000) notices.push(...cancelPending(s, 'No pullback came in time', new Date(now).toISOString()))
       if (s.cycle && now - s.cycle.expiryT > 5 * 60000) { notices.push({ kind: 'info', text: '⚠️ <b>Settled late</b>: the data feed lagged, so the last known price was used.' }); notices.push(...settleExpired(s, s.prices[auto] ?? s.cycle.entry, now)) }

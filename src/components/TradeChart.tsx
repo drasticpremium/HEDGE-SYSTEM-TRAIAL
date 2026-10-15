@@ -10,6 +10,14 @@ export function cycleLevels(c: Cycle): Level[] {
   return [{ price: c.entry, label: 'Entry', color: '#5ea0ff' }, { price: c.entry + sg * c.stopPips * c.pip, label: 'Exness stop', color: '#ff6d7a' }, { price: c.entry - sg * c.tpPips * c.pip, label: 'Exness TP', color: '#2ecc8f' }, { price: c.entry + sg * 0.5 * c.pip, label: 'Counter trigger', color: '#f5b84b' }]
 }
 export const cycleBox = (c: Cycle): PosBox => { const sg = c.dir === 'CALL' ? 1 : -1; return { t0: c.openT, t1: c.expiryT, entry: c.entry, sl: c.entry + sg * c.stopPips * c.pip, tp: c.entry - sg * c.tpPips * c.pip, slPips: c.stopPips, tpPips: c.tpPips, quotex: c.dir === 'CALL' ? 'BUY' : 'SELL' } }
+/** Keeps only the latest unbroken stretch of candles. A gap over 45 minutes (the overnight break) starts a new stretch, so yesterday's price level never squashes today's chart. */
+export function recentRun(candles: Candle[], maxGapMs = 45 * 60000): Candle[] {
+  for (let i = candles.length - 1; i > 0; i--) if (candles[i].t - candles[i - 1].t > maxGapMs) return candles.slice(i)
+  return candles
+}
+/** How far from the entry (in price) the chart makes room for. A take profit further than this is drawn up to the chart edge instead of flattening every candle. */
+const tpCap = (b: PosBox) => Math.max(15, b.slPips * 3) * (Math.abs(b.sl - b.entry) / Math.max(b.slPips, 0.01))
+const tpShown = (b: PosBox) => b.entry + (b.tp >= b.entry ? 1 : -1) * Math.min(Math.abs(b.tp - b.entry), tpCap(b))
 const sec = (t: number) => Math.floor(t / 1000) as UTCTimestamp
 export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: { candles: Candle[]; levels: Level[]; box?: PosBox | null; digits?: number; height?: number }) {
   const el = useRef<HTMLDivElement>(null), chart = useRef<IChartApi | null>(null), series = useRef<ISeriesApi<'Candlestick'> | null>(null), lines = useRef<IPriceLine[]>([]), prev = useRef({ n: 0, t: 0 }), [, force] = useState(0), rangeRef = useRef<{ lo: number; hi: number } | null>(null)
@@ -35,7 +43,8 @@ export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: {
     const s = series.current; if (!s) return
     lines.current.forEach((l) => s.removePriceLine(l)); lines.current = levels.map((l) => s.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: l.label }))
     // Make the price scale include entry, stop and take profit, so every box is drawn exactly between its own price limits instead of being squashed or clipped.
-    const ps = [...levels.map((l) => l.price), ...(box ? [box.entry, box.sl, box.tp] : [])]
+    const clampP = (p: number) => (box ? Math.max(box.entry - tpCap(box), Math.min(box.entry + tpCap(box), p)) : p)
+    const ps = [...levels.map((l) => clampP(l.price)), ...(box ? [box.entry, box.sl, tpShown(box)] : [])]
     rangeRef.current = ps.length ? { lo: Math.min(...ps), hi: Math.max(...ps) } : null
     s.applyOptions({ autoscaleInfoProvider: (orig: () => any) => { const r = orig(), x = rangeRef.current; if (!r || !x) return r; const pad = (Math.max(r.priceRange.maxValue, x.hi) - Math.min(r.priceRange.minValue, x.lo)) * 0.08; return { priceRange: { minValue: Math.min(r.priceRange.minValue, x.lo) - pad, maxValue: Math.max(r.priceRange.maxValue, x.hi) + pad }, margins: r.margins } } } as never)
   }, [key, digits, !!last, box?.entry, box?.sl, box?.tp])
@@ -47,11 +56,11 @@ export function TradeChart({ candles, levels, box, digits = 5, height = 360 }: {
     const ts = c.timeScale(), a = candles[candles.length - 1], b = candles[candles.length - 2], xa = ts.timeToCoordinate(sec(a.t)), xb = ts.timeToCoordinate(sec(b.t))
     if (xa !== null && xb !== null) {
       const sp = xa - xb, xAt = (t: number) => (t >= a.t ? xa + ((t - a.t) / 60000) * sp : ts.timeToCoordinate(sec(t)))
-      const x0 = xAt(box.t0), x1 = xAt(box.t1), ye = s.priceToCoordinate(box.entry), ys = s.priceToCoordinate(box.sl), yt = s.priceToCoordinate(box.tp)
+      const x0 = xAt(box.t0), x1 = xAt(box.t1), ye = s.priceToCoordinate(box.entry), ys = s.priceToCoordinate(box.sl), yt = s.priceToCoordinate(tpShown(box))
       if (x0 !== null && x1 !== null && ye !== null && ys !== null && yt !== null) {
         const left = Math.min(x0, x1), width = Math.max(4, Math.abs(x1 - x0)), hedge = box.quotex === 'BUY' ? 'SELL' : 'BUY'
         rect = <>
-          <div className="tv-box tv-profit" style={{ left, width, top: Math.min(ye, yt), height: Math.abs(yt - ye) }}><span>Take profit {box.tpPips}p</span></div>
+          <div className="tv-box tv-profit" style={{ left, width, top: Math.min(ye, yt), height: Math.abs(yt - ye) }}><span>Take profit {box.tpPips}p{Math.abs(box.tp - box.entry) > tpCap(box) + 1e-12 ? ' (target is further than the chart shows)' : ''}</span></div>
           <div className="tv-box tv-loss" style={{ left, width, top: Math.min(ye, ys), height: Math.abs(ys - ye) }}><span>Stop loss {box.slPips}p</span></div>
           <div className="tv-entry" style={{ left, width, top: ye }}><span>Quotex {box.quotex} + Exness {hedge} @ {box.entry.toFixed(digits)}</span></div></>
       }

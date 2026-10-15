@@ -1,14 +1,14 @@
 import { realizedVol15, type Candle } from './math'
 import { step, type Cycle, type Settled } from './cycle'
-import { signalM15 } from './signalM15'
+import { signalM15, chopCheck } from './signalM15'
 import { pipSize, pipValuePerLot } from './pairs'
 import { newCopy, processCopyCandle, type CopyState } from './copyCore'
 import type { CycleLogRow, SignalRow } from '../db/db'
 
 /** Mon-Fri, 08:00-17:00 GMT. Entries happen at 15-minute opens from 08:00 to 16:45 so the 15-minute binary ends by 17:00. */
 export const isTradingSession = (t: number) => { const d = new Date(t), day = d.getUTCDay(); return day >= 1 && day <= 5 && d.getUTCHours() >= 8 && d.getUTCHours() < 17 }
-export interface Settings { stakeUsd: number; payoutMin: number; payoutMax: number; maxLots: number; autoLots: boolean; stopUsd: number; tpUsd: number; commission: number; counterWindowMin: number; counterMinLeft: number; minStrength: number; ghsPerUsd: number; leverage: number; tgNoTrade: boolean; copyLots: number; recoveryOn: boolean; recoveryMult: number; headsUp: boolean; leadMin: number; minNetWin: number; stopAtrMult: number; pullbackOn: boolean; pullbackPct: number; pullbackWindowMin: number }
-export const defaultSettings: Settings = { stakeUsd: 5, payoutMin: 91, payoutMax: 95, maxLots: 0.2, autoLots: true, stopUsd: 4, tpUsd: 15, commission: 9, counterWindowMin: 5, counterMinLeft: 1, minStrength: 60, ghsPerUsd: 11, leverage: 500, tgNoTrade: false, copyLots: 0.01, recoveryOn: false, recoveryMult: 2, headsUp: false, leadMin: 2, minNetWin: 1.5, stopAtrMult: 0.7, pullbackOn: false, pullbackPct: 20, pullbackWindowMin: 8 }
+export interface Settings { stakeUsd: number; payoutMin: number; payoutMax: number; maxLots: number; autoLots: boolean; stopUsd: number; tpUsd: number; commission: number; counterWindowMin: number; counterMinLeft: number; minStrength: number; ghsPerUsd: number; leverage: number; tgNoTrade: boolean; copyLots: number; recoveryOn: boolean; recoveryMult: number; headsUp: boolean; leadMin: number; minNetWin: number; stopAtrMult: number; pullbackOn: boolean; pullbackPct: number; pullbackWindowMin: number; chopFilterOn: boolean; chopBars: number; chopMinBodyPct: number; chopMinEffPct: number }
+export const defaultSettings: Settings = { stakeUsd: 5, payoutMin: 91, payoutMax: 95, maxLots: 0.2, autoLots: true, stopUsd: 4, tpUsd: 15, commission: 9, counterWindowMin: 5, counterMinLeft: 1, minStrength: 60, ghsPerUsd: 11, leverage: 500, tgNoTrade: false, copyLots: 0.01, recoveryOn: false, recoveryMult: 2, headsUp: false, leadMin: 2, minNetWin: 1.5, stopAtrMult: 0.7, pullbackOn: false, pullbackPct: 20, pullbackWindowMin: 8, chopFilterOn: true, chopBars: 6, chopMinBodyPct: 45, chopMinEffPct: 40 }
 export type Notice = { kind: 'signal'; row: SignalRow } | { kind: 'cycle'; row: CycleLogRow } | { kind: 'notrade'; pair: string; time: string; reasons: string[] } | { kind: 'info'; text: string }
 /** A planned trade waiting for its pullback: enter at entryLevel, skip if price reaches skipLevel first. */
 export interface Pending { pair: string; dir: 'CALL' | 'PUT'; openT: number; ref: number; entryLevel: number; skipLevel: number; pips: number; atr: number; strength: number; until: number }
@@ -33,7 +33,10 @@ const dot = (side: string) => (side === 'BUY' ? '🔵' : '🔴'), esc = (x: stri
 export function plan(s: EngineState, pair: string, price: number, o: { m15?: Candle[]; step?: number; ignoreOpen?: boolean; dir?: 'CALL' | 'PUT'; noGate?: boolean } = {}) {
   const st = s.settings, pip = pipSize(pair), pv = pipValuePerLot(pair), step = st.recoveryOn ? o.step ?? 0 : 0, forced = step > 0, mult = step === 2 ? st.recoveryMult : 1
   const sig = signalM15({ h1: s.h1[pair] ?? [], m15: o.m15 ?? s.m15[pair] ?? [], price, pip, minStrength: st.minStrength }), reasons: string[] = []
-  if (forced || o.noGate) { if (!o.dir && !s.ladderDir && sig.inputs.ema50 === null) reasons.push('Not enough H1 history to pick a direction') } else { reasons.push(...sig.reasons); if (s.news) reasons.push('News nearby switch is on') }
+  if (forced || o.noGate) { if (!o.dir && !s.ladderDir && sig.inputs.ema50 === null) reasons.push('Not enough H1 history to pick a direction') } else {
+    reasons.push(...sig.reasons); if (s.news) reasons.push('News nearby switch is on')
+    if (st.chopFilterOn) { const ch = chopCheck(o.m15 ?? s.m15[pair] ?? [], sig.direction, st.chopBars, st.chopMinBodyPct, st.chopMinEffPct); if (!ch.ok) reasons.push(ch.reason) }   // skip choppy markets
+  }
   if (s.cycle && !o.ignoreOpen) reasons.push('Previous cycle still open')
   const stake = +(st.stakeUsd * mult).toFixed(2)
   if (s.binary < stake) reasons.push(`Binary balance is below the ${mult > 1 ? 'doubled ' : ''}stake`)
@@ -225,7 +228,7 @@ ${ic(day)} Today: ${day.length} cycles, ${day.length ? f(net(day)) : 'no trades'
 🟠 Exness account GH₵${(exness * rate).toFixed(2)}`
 }
 
-const RANGES: Record<string, [number, number]> = { stakeUsd: [0.5, 5000], payoutMin: [50, 100], payoutMax: [50, 100], maxLots: [0.01, 50], stopUsd: [0.1, 100000], tpUsd: [0.1, 100000], commission: [0, 100], counterWindowMin: [1, 14], counterMinLeft: [0, 14], minStrength: [0, 100], leverage: [1, 3000], minNetWin: [0, 10000], stopAtrMult: [0.2, 3], pullbackPct: [5, 100], pullbackWindowMin: [1, 14], ghsPerUsd: [1, 1000], copyLots: [0.01, 50], recoveryMult: [1, 5], leadMin: [1, 5] }
+const RANGES: Record<string, [number, number]> = { stakeUsd: [0.5, 5000], payoutMin: [50, 100], payoutMax: [50, 100], maxLots: [0.01, 50], stopUsd: [0.1, 100000], tpUsd: [0.1, 100000], commission: [0, 100], counterWindowMin: [1, 14], counterMinLeft: [0, 14], minStrength: [0, 100], leverage: [1, 3000], minNetWin: [0, 10000], stopAtrMult: [0.2, 3], pullbackPct: [5, 100], pullbackWindowMin: [1, 14], chopBars: [3, 20], chopMinBodyPct: [5, 95], chopMinEffPct: [5, 95], ghsPerUsd: [1, 1000], copyLots: [0.01, 50], recoveryMult: [1, 5], leadMin: [1, 5] }
 /** Checks a settings patch from the website. Returns the cleaned values to apply, or an error to show. Unknown keys and recoveryOn (the button owns that) are ignored. */
 export function validateSettings(patch: Record<string, unknown>, current: Settings): { ok: true; values: Partial<Settings> } | { ok: false; error: string } {
   const values: Record<string, number | boolean> = {}

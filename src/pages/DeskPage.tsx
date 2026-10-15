@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useServer } from '../store/server'
-import { TradeChart } from '../components/TradeChart'
+import { TradeChart, recentRun } from '../components/TradeChart'
 import { SignalCards } from '../components/SignalHistory'
 import { Pill } from '../components/Pill'
 import { AdminToken } from '../components/AdminToken'
@@ -55,7 +55,7 @@ export function DeskPage() {
           <div className="kpi"><span>Combined (estimate)</span><strong className={qUsd + exUsd >= 0 ? 'up' : 'down'}>{qUsd + exUsd >= 0 ? '+' : '-'}${Math.abs(qUsd + exUsd).toFixed(2)}</strong></div></div>
         <p className="mut">The percentage is a random-walk estimate, not a promise. Final results use the real price at expiry.</p></section>}
       <section className="panel card wide"><h2>{pair} chart (real market, 1-minute)</h2>
-        <TradeChart candles={m1} digits={dp} levels={t ? [{ price: t.price, label: 'Entry', color: '#5ea0ff' }, { price: t.sl!, label: 'Exness stop', color: '#ff6d7a' }, { price: t.tp!, label: 'Exness TP', color: '#2ecc8f' }, { price: t.price + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : d.pending && d.pending.pair === pair ? [{ price: d.pending.entryLevel, label: 'Pullback entry', color: '#5ea0ff' }, { price: d.pending.skipLevel, label: 'Skip level', color: '#ff6d7a' }] : []}
+        <TradeChart candles={recentRun(m1)} digits={dp} levels={t ? [{ price: t.price, label: 'Entry', color: '#5ea0ff' }, { price: t.sl!, label: 'Exness stop', color: '#ff6d7a' }, { price: t.tp!, label: 'Exness TP', color: '#2ecc8f' }, { price: t.price + sg * 0.5 * pip, label: 'Counter trigger', color: '#f5b84b' }] : d.pending && d.pending.pair === pair ? [{ price: d.pending.entryLevel, label: 'Pullback entry', color: '#5ea0ff' }, { price: d.pending.skipLevel, label: 'Skip level', color: '#ff6d7a' }] : []}
           box={t ? { t0: Date.parse(t.time), t1: Date.parse(t.expiry!), entry: t.price, sl: t.sl!, tp: t.tp!, slPips: t.stopPips!, tpPips: t.tpPips!, quotex: t.dir === 'CALL' ? 'BUY' : 'SELL' } : null} /></section>
       <section className="wide"><h2>Signal history</h2><p className="mut">Newest first. Green = tradable candle, red = a run of no-trade candles (shown once).</p><SignalCards rows={d.signals} /></section>
     </div>

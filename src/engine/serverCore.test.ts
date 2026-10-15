@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { chopCheck } from './signalM15'
 import { newState, decide, processCandle, setCapital, clearAuto, signalMessage, cycleMessage, summaryText, infoMessage, nextLadder, previewNotices, plan, rateOf, settleExpired, cancelPending, setupMessage, validateSettings, type EngineState } from './serverCore'
 const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random())
 /** Real-data stand-in: a long random walk, fed the same way the server feeds real candles (M1 closes, M15/H1 built from them, decision at each 15-minute open). */
@@ -35,7 +36,7 @@ describe('admin helpers and messages', () => {
 const series = (n: number, f: (i: number) => number, step: number) => Array.from({ length: n }, (_, i) => { const c = f(i); return { t: 1.7e12 + i * step, o: c, h: c + 0.0002, l: c - 0.0002, c } })
 /** State with a clear uptrend, a rich account, and a minimum strength nobody can reach (so normal trades are blocked). */
 function ready(extra: Partial<EngineState['settings']> = {}) {
-  const s = newState(); setCapital(s, 50000, 50000); Object.assign(s.settings, { minStrength: 101, recoveryOn: true, ...extra })
+  const s = newState(); setCapital(s, 50000, 50000); Object.assign(s.settings, { minStrength: 101, recoveryOn: true, chopFilterOn: false, ...extra })
   s.h1.EURUSD = series(80, (i) => 1.08 + i * 0.0003, 3600000); s.m15.EURUSD = series(60, (i) => 1.1 + i * 0.00004, 900000); s.candles.EURUSD = series(60, (i) => 1.1 + i * 0.00001, 60000); return s
 }
 describe('recovery ladder', () => {
@@ -115,7 +116,7 @@ describe('live GH₵ rate', () => {
 const T0 = Date.UTC(2026, 9, 6, 8, 0), PRICE = 1.115
 /** A state whose signal is READY (clear uptrend, RSI mid-zone, normal range) so pullback setups can be tested without relying on luck. */
 const pbState = (over: Partial<EngineState['settings']> = {}, range = 0.0002) => {
-  const s = newState(); setCapital(s, 50000, 50000); Object.assign(s.settings, { minStrength: 0, pullbackOn: true, ...over })
+  const s = newState(); setCapital(s, 50000, 50000); Object.assign(s.settings, { minStrength: 0, pullbackOn: true, chopFilterOn: false, ...over })
   s.h1.EURUSD = series(80, (i) => 1.08 + i * 0.0003, 3600000); let c = 1.1
   s.m15.EURUSD = Array.from({ length: 60 }, (_, i) => { if (i) c += i % 2 ? 0.00012 : -0.00007; return { t: 1.7e12 + i * 900000, o: c, h: c + range, l: c - range, c } })
   s.candles.EURUSD = series(60, (i) => 1.1 + i * 0.00001, 60000); return s
@@ -173,4 +174,27 @@ describe('pullback entry', () => {
     const cur = newState().settings; expect(validateSettings({ pullbackOn: true, pullbackPct: 25 }, cur)).toEqual({ ok: true, values: { pullbackPct: 25 } })
     for (const bad of [{ pullbackPct: 0 }, { pullbackPct: 500 }, { pullbackWindowMin: 0 }, { stopAtrMult: 10 }]) expect(validateSettings(bad, cur).ok).toBe(false)
   })
+})
+
+describe('choppy-market filter', () => {
+  const bar = (i: number, o: number, c: number, wick: number) => ({ t: 1.7e12 + i * 900000, o, h: Math.max(o, c) + wick, l: Math.min(o, c) - wick, c })
+  const trend = (n: number, dir = 1) => { let p = 1.1; return Array.from({ length: n }, (_, i) => { const o = p; p += dir * 0.0004; return bar(i, o, p, 0.00005) }) }          // thick bodies, steady progress
+  const chop = (n: number) => { let p = 1.1; return Array.from({ length: n }, (_, i) => { const o = p; p += (i % 2 ? 1 : -1) * 0.0001; return bar(i, o, p, 0.0004) }) }               // tiny bodies, long wicks, going nowhere
+  it('thick bodies with steady progress pass; small bodies and long wicks going nowhere fail', () => {
+    const a = chopCheck(trend(20), 'CALL', 6, 45, 40), b = chopCheck(chop(20), 'CALL', 6, 45, 40)
+    expect(a.ok).toBe(true); expect(a.bodyPct).toBeGreaterThan(70); expect(a.effPct).toBeGreaterThan(90)
+    expect(b.ok).toBe(false); expect(b.bodyPct).toBeLessThan(25); expect(b.reason).toContain('Choppy market'); expect(b.reason).toContain('need 45% and 40%')
+  })
+  it('progress is measured in the trade direction: a clean downtrend does not support a CALL', () => { expect(chopCheck(trend(20, -1), 'CALL', 6, 45, 40).ok).toBe(false); expect(chopCheck(trend(20, -1), 'PUT', 6, 45, 40).ok).toBe(true) })
+  it('thresholds are respected and too little history never blocks', () => { expect(chopCheck(chop(20), 'CALL', 6, 5, 0).ok).toBe(true); expect(chopCheck(trend(3), 'CALL', 6, 45, 40).ok).toBe(true) })
+  it('the engine skips a ready signal in a choppy market (with the reason) and trades a clean one; recovery and pullback entries are not re-gated', () => {
+    const mk = (m15: ReturnType<typeof trend>, over: Partial<EngineState['settings']> = {}) => { const s = pbState({ pullbackOn: false, chopFilterOn: true, ...over }); s.m15.EURUSD = m15; return s }
+    const blocked = plan(mk(chop(60)), 'EURUSD', PRICE, { step: 0 }); expect(blocked.reasons.some((r) => r.includes('Choppy market'))).toBe(true)
+    expect(plan(mk(trend(60)), 'EURUSD', PRICE, { step: 0 }).reasons.some((r) => r.includes('Choppy'))).toBe(false)
+    expect(plan(mk(chop(60), { chopFilterOn: false }), 'EURUSD', PRICE, { step: 0 }).reasons.some((r) => r.includes('Choppy'))).toBe(false)
+    expect(plan(mk(chop(60), { recoveryOn: true }), 'EURUSD', PRICE, { step: 1 }).reasons.some((r) => r.includes('Choppy'))).toBe(false)
+    expect(plan(mk(chop(60)), 'EURUSD', PRICE, { step: 0, noGate: true, dir: 'CALL' }).reasons.some((r) => r.includes('Choppy'))).toBe(false)
+    const s = mk(chop(60)); decide(s, 'EURUSD', T0, PRICE); expect(s.cycle).toBeNull(); expect(s.signals[0].kind).toBe('NO_TRADE'); expect(s.signals[0].reasons.join()).toContain('Choppy market')
+  })
+  it('is on by default and its settings are range-checked', () => { const d = newState().settings; expect([d.chopFilterOn, d.chopBars, d.chopMinBodyPct, d.chopMinEffPct]).toEqual([true, 6, 45, 40]); for (const bad of [{ chopBars: 1 }, { chopMinBodyPct: 0 }, { chopMinEffPct: 99 }]) expect(validateSettings(bad, d).ok).toBe(false) })
 })

@@ -28,3 +28,17 @@ export function signalM15(i: { h1: Candle[]; m15: Candle[]; price: number; pip: 
   if (strength < i.minStrength && !reasons.length) reasons.push(`Strength ${strength} is below ${i.minStrength}`)
   return { direction: dir, strength, ready: reasons.length === 0, reasons, inputs: { ema50: e50, trendPips, slopePips, rsi: r, atrPips } }
 }
+
+export interface ChopResult { ok: boolean; bodyPct: number; effPct: number; reason: string }
+/** Is the market trending cleanly or chopping? Looks at the last n closed candles:
+ *  body share = how much of each candle's range is real body (small bodies and long wicks = indecision),
+ *  progress = how much of the total up-and-down travel ended up as net movement in the trade direction (low = going nowhere). */
+export function chopCheck(m15: Candle[], dir: 'CALL' | 'PUT', n: number, minBodyPct: number, minEffPct: number): ChopResult {
+  const w = m15.slice(-(n + 1))
+  if (w.length < n + 1) return { ok: true, bodyPct: 100, effPct: 100, reason: '' }
+  const bars = w.slice(1), sg = dir === 'CALL' ? 1 : -1
+  const bodyPct = (bars.reduce((a, c) => a + (c.h - c.l > 0 ? Math.abs(c.c - c.o) / (c.h - c.l) : 0), 0) / bars.length) * 100
+  const path = bars.reduce((a, c, i) => a + Math.abs(c.c - w[i].c), 0), net = (w[w.length - 1].c - w[0].c) * sg
+  const effPct = path > 0 ? (Math.max(0, net) / path) * 100 : 0, ok = bodyPct >= minBodyPct && effPct >= minEffPct
+  return { ok, bodyPct: +bodyPct.toFixed(0), effPct: +effPct.toFixed(0), reason: ok ? '' : `Choppy market: the last ${n} candles have bodies averaging ${bodyPct.toFixed(0)}% of their range and made only ${effPct.toFixed(0)}% net progress in the trade direction (need ${minBodyPct}% and ${minEffPct}%)` }
+}
